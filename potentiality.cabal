@@ -42,11 +42,20 @@ library
   hs-source-dirs:  src
   exposed-modules:
     Potentiality
+    Potentiality.Task
+    Potentiality.Task.Parse
+    Potentiality.Vault
     Potentiality.Version
   build-depends:
+    , aeson                 >= 2.1
     , base                  >= 4.18 && < 5
+    , bytestring
+    , exceptions
     , optparse-applicative  >= 0.18
+    , path
     , text
+    , time
+    , yaml
 
 executable pot
   import:         shared

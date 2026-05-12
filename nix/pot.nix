@@ -3,10 +3,16 @@
 # when cabal2nix is available in your nixpkgs (it currently fails to build
 # transitively through apr-util on this revision; tracked separately).
 { mkDerivation
+, aeson
 , base
+, bytestring
+, exceptions
 , lib
 , optparse-applicative
+, path
 , text
+, time
+, yaml
 }:
 mkDerivation {
   pname = "potentiality";
@@ -15,9 +21,15 @@ mkDerivation {
   isLibrary = true;
   isExecutable = true;
   libraryHaskellDepends = [
+    aeson
     base
+    bytestring
+    exceptions
     optparse-applicative
+    path
     text
+    time
+    yaml
   ];
   executableHaskellDepends = [
     base
