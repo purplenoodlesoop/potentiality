@@ -6,8 +6,9 @@ module Potentiality.CLI
   ( run
   ) where
 
-import Control.Monad (forM, unless)
+import Control.Monad (forM, unless, when)
 import Data.Aeson (Value, object, (.=))
+import Data.Char (isDigit)
 import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as BL
@@ -19,14 +20,17 @@ import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime, getCurrentTime)
 import Data.Version (showVersion)
+import Data.Yaml qualified as Yaml
 import Options.Applicative
-import Path (Abs, Dir, Path, parseAbsDir, toFilePath)
-import Path.IO (doesFileExist, getCurrentDir)
+import Path (Abs, Dir, File, Path, filename, parent, parseAbsDir, parseRelFile, toFilePath, (</>))
+import Path qualified
+import Path.IO (doesDirExist, doesFileExist, ensureDir, getCurrentDir, listDir)
 import Potentiality.Atomic (atomicWriteBinaryFile)
 import Potentiality.Meta
   ( Meta (..)
   , PlanDecision (..)
   , mutateMeta
+  , readMetaOrEmpty
   )
 import Potentiality.Task
   ( Frontmatter (..)
@@ -52,11 +56,21 @@ import Potentiality.Task.Write
   , writeTaskFile
   )
 import Potentiality.Ulid (newUlid)
-import Potentiality.Vault (Vault (..), answerFile, cancelFile, transcriptFile)
+import Potentiality.Vault
+  ( Vault (..)
+  , answerFile
+  , cancelFile
+  , findingsFile
+  , planFile
+  , questionFile
+  , questionsDir
+  , transcriptFile
+  )
 import Potentiality.Vault.Scan (listTaskIds)
 import Potentiality.Version (version)
+import Potentiality.Wait (WaitResult (..), waitForCondition, waitForFile)
 import System.Environment (lookupEnv)
-import System.Exit (exitFailure)
+import System.Exit (ExitCode (..), exitFailure, exitSuccess, exitWith)
 import System.IO (hPutStrLn, stderr)
 
 -- ---------------------------------------------------------------------------
@@ -77,7 +91,13 @@ data DoCommand
   | DoTail DoTailOpts
 
 data AgentCommand
-  = AgentTodo
+  = AgentAsk AgentAskOpts
+  | AgentStatus Text
+  | AgentNote Text
+  | AgentFinding Text
+  | AgentPlan Text
+  | AgentDone (Maybe Text)
+  | AgentBlocked Text
 
 data DoNewOpts = DoNewOpts
   { dnKind :: Text
@@ -136,6 +156,13 @@ data DoTailOpts = DoTailOpts
   , dtTail :: Int
   }
 
+data AgentAskOpts = AgentAskOpts
+  { aaQuestion :: Text
+  , aaOptions :: Maybe Text
+  , aaUrgency :: Text
+  , aaTimeout :: Maybe Int
+  }
+
 -- ---------------------------------------------------------------------------
 -- Parser
 
@@ -177,7 +204,31 @@ doParser =
 agentParser :: Parser AgentCommand
 agentParser =
   hsubparser
-    (command "todo" (info (pure AgentTodo) (progDesc "Placeholder for upcoming agent verbs")))
+    ( command "ask" (info (AgentAsk <$> agentAskOpts) (progDesc "Block until the human answers a question"))
+        <> command "status" (info (AgentStatus <$> bodyArg) (progDesc "Set meta.yaml#current_step"))
+        <> command "note" (info (AgentNote <$> bodyArg) (progDesc "Append to transcript.md"))
+        <> command "finding" (info (AgentFinding <$> bodyArg) (progDesc "Append to findings.md"))
+        <> command "plan" (info (AgentPlan <$> bodyArg) (progDesc "Propose a plan; block on approval"))
+        <> command "done" (info (AgentDone <$> doneOpts) (progDesc "Mark the task done"))
+        <> command "blocked" (info (AgentBlocked <$> reasonOpt) (progDesc "Mark the task blocked"))
+    )
+
+bodyArg :: Parser Text
+bodyArg = strArgument (metavar "TEXT" <> help "Text payload (quote it)")
+
+doneOpts :: Parser (Maybe Text)
+doneOpts = optional (strOption (long "message" <> metavar "TEXT" <> help "Optional closing message"))
+
+reasonOpt :: Parser Text
+reasonOpt = strOption (long "reason" <> metavar "TEXT" <> help "Why is the task blocked?")
+
+agentAskOpts :: Parser AgentAskOpts
+agentAskOpts =
+  AgentAskOpts
+    <$> strArgument (metavar "QUESTION" <> help "Question text (quote it)")
+    <*> optional (strOption (long "options" <> metavar "A,B,C" <> help "Comma-separated options, rendered as inline-keyboard buttons by Horizon"))
+    <*> strOption (long "urgency" <> metavar "URGENCY" <> value "normal" <> showDefault <> help "normal | high")
+    <*> optional (option auto (long "timeout" <> metavar "SECONDS" <> help "Exit 124 if no answer within N seconds"))
 
 vaultOption :: Parser (Maybe FilePath)
 vaultOption =
@@ -290,10 +341,16 @@ run = do
     CmdDo (DoAnswer o) -> doAnswer o
     CmdDo (DoApprove o) -> doApprove o
     CmdDo (DoTail o) -> doTail o
-    CmdAgent AgentTodo -> die "pot agent: no verbs implemented yet (phase 5)"
+    CmdAgent (AgentAsk o) -> agentAsk o
+    CmdAgent (AgentStatus t) -> agentStatus t
+    CmdAgent (AgentNote t) -> agentNote t
+    CmdAgent (AgentFinding t) -> agentFinding t
+    CmdAgent (AgentPlan t) -> agentPlan t
+    CmdAgent (AgentDone mt) -> agentDone mt
+    CmdAgent (AgentBlocked t) -> agentBlocked t
 
 -- ---------------------------------------------------------------------------
--- Handlers
+-- Handlers: pot do *
 
 doNew :: DoNewOpts -> IO ()
 doNew o = do
@@ -484,7 +541,148 @@ doTail o = do
   TIO.putStr txt
 
 -- ---------------------------------------------------------------------------
+-- Handlers: pot agent *
+
+agentAsk :: AgentAskOpts -> IO ()
+agentAsk o = do
+  (vault, tid) <- resolveTaskFromEnv
+  qdir <- questionsDir vault tid
+  ensureDir qdir
+  num <- nextQuestionNumber qdir
+  qfp <- questionFile vault tid num
+  afp <- answerFile vault tid num
+  cancelFp <- cancelFile vault tid
+  now <- getCurrentTime
+  let optionsList = parseOptionsCsv (aaOptions o)
+      frontmatterValue =
+        object $
+          [ "asked_at" .= now
+          , "urgency" .= aaUrgency o
+          ]
+            <> maybe [] (\os -> ["options" .= os]) optionsList
+      content =
+        "---\n"
+          <> Yaml.encode frontmatterValue
+          <> "---\n"
+          <> TE.encodeUtf8 (aaQuestion o <> "\n")
+  atomicWriteBinaryFile qfp content
+  res <- waitForFile afp [cancelFp] (aaTimeout o)
+  case res of
+    Found () -> do
+      bs <- BS.readFile (toFilePath afp)
+      let txt = either (const "") id (TE.decodeUtf8' bs)
+      TIO.putStrLn (T.strip txt)
+    Cancelled -> exitWith (ExitFailure 130)
+    TimedOut -> exitWith (ExitFailure 124)
+
+parseOptionsCsv :: Maybe Text -> Maybe [Text]
+parseOptionsCsv Nothing = Nothing
+parseOptionsCsv (Just t)
+  | T.null (T.strip t) = Nothing
+  | otherwise = Just (map T.strip (T.splitOn "," t))
+
+-- | Scan @questions\/@ for files of the form @NNN.md@ or @NNN.answer.md@
+-- and return one more than the largest @NNN@. Returns 1 when the
+-- directory is empty or absent.
+nextQuestionNumber :: Path Abs Dir -> IO Int
+nextQuestionNumber dir = do
+  e <- doesDirExist dir
+  if not e
+    then pure 1
+    else do
+      (_dirs, files) <- listDir dir
+      let nums = [n | f <- files, Just n <- [parseQuestionFileNum (toFilePath (filename f))]]
+      pure (1 + maximum (0 : nums))
+
+parseQuestionFileNum :: FilePath -> Maybe Int
+parseQuestionFileNum name
+  | length name >= 6
+  , all isDigit (take 3 name)
+  , drop 3 name == ".md" || drop 3 name == ".answer.md" =
+      Just (read (take 3 name))
+  | otherwise = Nothing
+
+agentStatus :: Text -> IO ()
+agentStatus txt = do
+  (vault, tid) <- resolveTaskFromEnv
+  mutateMeta vault tid (\m -> m {metaCurrentStep = Just txt})
+
+agentNote :: Text -> IO ()
+agentNote txt = do
+  (vault, tid) <- resolveTaskFromEnv
+  fp <- transcriptFile vault tid
+  appendTextLine fp txt
+
+agentFinding :: Text -> IO ()
+agentFinding txt = do
+  (vault, tid) <- resolveTaskFromEnv
+  fp <- findingsFile vault tid
+  appendTextLine fp txt
+
+agentPlan :: Text -> IO ()
+agentPlan txt = do
+  (vault, tid) <- resolveTaskFromEnv
+  fp <- planFile vault tid
+  atomicWriteBinaryFile fp (TE.encodeUtf8 txt)
+  mutateMeta vault tid $ \m ->
+    m
+      { metaPlanDecision = Just PDPending
+      , metaPlanRevision = Nothing
+      , metaPlanDecidedAt = Nothing
+      }
+  cancelFp <- cancelFile vault tid
+  res <- waitForCondition (checkPlanDecision vault tid) [cancelFp] Nothing
+  case res of
+    Found PDApproved -> do
+      TIO.putStrLn "approved"
+      exitSuccess
+    Found PDRevise -> do
+      m <- readMetaOrEmpty vault tid
+      TIO.putStrLn ("revise: " <> maybe "" id (metaPlanRevision m))
+      exitSuccess
+    Found PDRejected -> do
+      TIO.putStrLn "rejected"
+      exitWith (ExitFailure 1)
+    Found PDPending -> die "internal error: waiter returned PDPending"
+    Cancelled -> exitWith (ExitFailure 130)
+    TimedOut -> exitWith (ExitFailure 124)
+
+checkPlanDecision :: Vault -> TaskId -> IO (Maybe PlanDecision)
+checkPlanDecision vault tid = do
+  m <- readMetaOrEmpty vault tid
+  pure $ case metaPlanDecision m of
+    Just PDPending -> Nothing
+    Just d -> Just d
+    Nothing -> Nothing
+
+agentDone :: Maybe Text -> IO ()
+agentDone msgM = do
+  (vault, tid) <- resolveTaskFromEnv
+  now <- getCurrentTime
+  mutateFrontmatter vault tid (\fm -> fm {fmStatus = Done})
+  mutateMeta vault tid (\m -> m {metaFinishedAt = Just now})
+  case msgM of
+    Just msg -> do
+      fp <- transcriptFile vault tid
+      appendTextLine fp ("\n## done\n" <> msg)
+    Nothing -> pure ()
+
+agentBlocked :: Text -> IO ()
+agentBlocked reason = do
+  (vault, tid) <- resolveTaskFromEnv
+  now <- getCurrentTime
+  mutateFrontmatter vault tid (\fm -> fm {fmStatus = Blocked})
+  mutateMeta vault tid (\m -> m {metaFinishedAt = Just now})
+  fp <- transcriptFile vault tid
+  appendTextLine fp ("\n## blocked\nReason: " <> reason)
+
+-- ---------------------------------------------------------------------------
 -- Helpers
+
+appendTextLine :: Path Abs File -> Text -> IO ()
+appendTextLine fp txt = do
+  ensureDir (parent fp)
+  BS.appendFile (toFilePath fp) (TE.encodeUtf8 (txt <> "\n"))
 
 deriveTitleFromBody :: Text -> Text
 deriveTitleFromBody t =
@@ -509,7 +707,26 @@ parseAbsDir' fp =
     Just p -> pure p
     Nothing -> die ("not an absolute directory path: " <> fp)
 
+-- | Resolve the task in scope for an @agent@ verb, reading
+-- @$POTENTIALITY_TASK_DIR@. Fails the process when the env var is unset
+-- because agent verbs are only meaningful inside a spawn.
+resolveTaskFromEnv :: IO (Vault, TaskId)
+resolveTaskFromEnv = do
+  envVal <- lookupEnv "POTENTIALITY_TASK_DIR"
+  case envVal of
+    Nothing -> die "POTENTIALITY_TASK_DIR is not set (run `pot agent ...` only inside a spawn)"
+    Just fp -> do
+      td <- parseAbsDir' fp
+      let tasksParent = parent td
+          vaultRoot = parent tasksParent
+          tidTxt = T.dropWhileEnd (== '/') (T.pack (toFilePath (Path.dirname td)))
+      pure (Vault vaultRoot, TaskId tidTxt)
+
 die :: String -> IO a
 die msg = do
   hPutStrLn stderr msg
   exitFailure
+
+-- Suppress unused-warning for symbols re-exported but not yet used.
+_when :: Bool -> IO () -> IO ()
+_when = when

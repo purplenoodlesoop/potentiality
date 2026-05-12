@@ -52,6 +52,7 @@ library
     Potentiality.Vault
     Potentiality.Vault.Scan
     Potentiality.Version
+    Potentiality.Wait
   build-depends:
     , aeson                 >= 2.1
     , aeson-pretty
