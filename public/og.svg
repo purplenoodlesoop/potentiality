@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0c0814"/>
+      <stop offset="55%" stop-color="#140d22"/>
+      <stop offset="100%" stop-color="#1a1130"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="0.92" cy="0.08" r="0.85">
+      <stop offset="0%" stop-color="#8a5dff" stop-opacity="0.28"/>
+      <stop offset="40%" stop-color="#8a5dff" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#8a5dff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.05" cy="0.95" r="0.7">
+      <stop offset="0%" stop-color="#6b3fde" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#6b3fde" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="emph" x1="0" y1="0" x2="1" y2="0.2">
+      <stop offset="0%" stop-color="#c9a7ff"/>
+      <stop offset="60%" stop-color="#b58bff"/>
+      <stop offset="100%" stop-color="#8a5dff"/>
+    </linearGradient>
+    <pattern id="dots" x="0" y="0" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.7" fill="#3a2d54" fill-opacity="0.55"/>
+    </pattern>
+  </defs>
+
+  <!-- Layered background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#dots)"/>
+  <rect width="1200" height="630" fill="url(#glow1)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+
+  <!-- Thin frame rule -->
+  <rect x="40" y="40" width="1120" height="550" fill="none" stroke="#2a2238" stroke-width="1" rx="6"/>
+
+  <!-- Corner ticks -->
+  <g stroke="#8a5dff" stroke-width="2" fill="none">
+    <path d="M 40 70 L 40 40 L 70 40"/>
+    <path d="M 1160 70 L 1160 40 L 1130 40"/>
+    <path d="M 40 560 L 40 590 L 70 590"/>
+    <path d="M 1160 560 L 1160 590 L 1130 590"/>
+  </g>
+
+  <!-- Top-left: brand mark -->
+  <g transform="translate(96, 112)">
+    <rect x="0" y="-4" width="16" height="32" fill="#8a5dff"/>
+    <rect x="0" y="-4" width="16" height="32" fill="#b58bff" opacity="0.4"/>
+    <text x="30" y="22" font-family="'SF Mono', 'JetBrains Mono', 'Menlo', ui-monospace, monospace" font-size="26" font-weight="600" fill="#b58bff" letter-spacing="0.5">potentiality</text>
+  </g>
+
+  <!-- Top-right: pre-alpha pill -->
+  <g transform="translate(978, 102)">
+    <rect x="0" y="0" width="126" height="32" rx="4" fill="none" stroke="#ffb46b" stroke-width="1.5" opacity="0.7"/>
+    <text x="63" y="22" font-family="'SF Mono', 'JetBrains Mono', 'Menlo', ui-monospace, monospace" font-size="13" font-weight="600" letter-spacing="2.5" fill="#ffb46b" text-anchor="middle">PRE-ALPHA</text>
+  </g>
+
+  <!-- Headline (left aligned, three lines) -->
+  <g font-family="-apple-system, system-ui, 'SF Pro Display', 'Inter', ui-sans-serif, sans-serif" font-weight="700" font-size="92" letter-spacing="-2.5">
+    <text x="96" y="280" fill="#ece6f7">Markdown in.</text>
+    <text x="96" y="380" fill="url(#emph)">Markdown out.</text>
+    <text x="96" y="480" fill="#ece6f7">Claude between.</text>
+  </g>
+
+  <!-- Bottom-left: tagline -->
+  <g transform="translate(96, 552)">
+    <text font-family="'SF Mono', 'JetBrains Mono', 'Menlo', ui-monospace, monospace" font-size="18" fill="#a89cc4">a vault that runs <tspan fill="#b58bff" font-weight="600">claude -p</tspan></text>
+  </g>
+
+  <!-- Bottom-right: URL -->
+  <g transform="translate(1104, 552)">
+    <text font-family="'SF Mono', 'JetBrains Mono', 'Menlo', ui-monospace, monospace" font-size="18" fill="#877aa1" text-anchor="end">potentiality.yakov.codes</text>
+  </g>
+</svg>
