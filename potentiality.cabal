@@ -44,6 +44,8 @@ library
     Potentiality
     Potentiality.Task
     Potentiality.Task.Parse
+    Potentiality.Task.Write
+    Potentiality.Ulid
     Potentiality.Vault
     Potentiality.Version
   build-depends:
@@ -53,6 +55,8 @@ library
     , exceptions
     , optparse-applicative  >= 0.18
     , path
+    , path-io
+    , random
     , text
     , time
     , yaml

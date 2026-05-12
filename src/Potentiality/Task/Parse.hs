@@ -32,7 +32,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Yaml qualified as Yaml
-import Potentiality.Task (Frontmatter, Task (..), TaskId)
+import Potentiality.Task (Task (..), TaskId)
 
 data ParseError
   = MissingFrontmatter
@@ -97,7 +97,3 @@ splitFrontmatter bs
     closeFenceFull = BSC.pack "\n---\n"
     closeFenceBare = BSC.pack "\n---"
 
--- Silence unused-import warning for 'Frontmatter' when downstream code
--- does not yet reference it through this module.
-_referenceFrontmatter :: Frontmatter -> Frontmatter
-_referenceFrontmatter = id

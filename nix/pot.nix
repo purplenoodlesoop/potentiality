@@ -10,6 +10,8 @@
 , lib
 , optparse-applicative
 , path
+, path-io
+, random
 , text
 , time
 , yaml
@@ -27,6 +29,8 @@ mkDerivation {
     exceptions
     optparse-applicative
     path
+    path-io
+    random
     text
     time
     yaml
