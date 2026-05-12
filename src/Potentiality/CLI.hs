@@ -70,6 +70,7 @@ import Potentiality.Vault
 import Potentiality.Vault.Scan (listTaskIds)
 import Potentiality.Version (version)
 import Potentiality.Wait (WaitResult (..), waitForCondition, waitForFile)
+import Potentiality.Watch (watchVault)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure, exitSuccess, exitWith)
 import System.IO (hPutStrLn, stderr)
@@ -91,6 +92,7 @@ data DoCommand
   | DoApprove DoApproveOpts
   | DoTail DoTailOpts
   | DoRun DoRunOpts
+  | DoWatch DoWatchOpts
 
 data AgentCommand
   = AgentAsk AgentAskOpts
@@ -163,6 +165,11 @@ data DoRunOpts = DoRunOpts
   , drVault :: Maybe FilePath
   }
 
+data DoWatchOpts = DoWatchOpts
+  { dwVault :: Maybe FilePath
+  , dwMaxConcurrent :: Int
+  }
+
 data AgentAskOpts = AgentAskOpts
   { aaQuestion :: Text
   , aaOptions :: Maybe Text
@@ -207,6 +214,7 @@ doParser =
         <> command "approve" (info (DoApprove <$> doApproveOpts) (progDesc "Approve/revise/reject a pending plan"))
         <> command "tail" (info (DoTail <$> doTailOpts) (progDesc "Show the tail of a task's transcript"))
         <> command "run" (info (DoRun <$> doRunOpts) (progDesc "Run a task to completion (spawns claude)"))
+        <> command "watch" (info (DoWatch <$> doWatchOpts) (progDesc "Watch the vault and run ready tasks"))
     )
 
 agentParser :: Parser AgentCommand
@@ -340,6 +348,12 @@ doRunOpts =
     <$> strArgument (metavar "TASK_FILE" <> help "Path to a task.md file inside a vault")
     <*> vaultOption
 
+doWatchOpts :: Parser DoWatchOpts
+doWatchOpts =
+  DoWatchOpts
+    <$> vaultOption
+    <*> option auto (long "max-concurrent" <> metavar "N" <> value 3 <> showDefault <> help "Concurrent task limit")
+
 -- ---------------------------------------------------------------------------
 -- Dispatch
 
@@ -356,6 +370,7 @@ run = do
     CmdDo (DoApprove o) -> doApprove o
     CmdDo (DoTail o) -> doTail o
     CmdDo (DoRun o) -> doRun o
+    CmdDo (DoWatch o) -> doWatch o
     CmdAgent (AgentAsk o) -> agentAsk o
     CmdAgent (AgentStatus t) -> agentStatus t
     CmdAgent (AgentNote t) -> agentNote t
@@ -568,6 +583,11 @@ doRun o = do
     Nothing -> pure (Vault vaultRoot)
   task <- readTask vault tid
   runClaude vault task
+
+doWatch :: DoWatchOpts -> IO ()
+doWatch o = do
+  vault <- resolveVault (dwVault o)
+  watchVault vault (dwMaxConcurrent o)
 
 parseAbsFile' :: FilePath -> IO (Path Abs File)
 parseAbsFile' fp =

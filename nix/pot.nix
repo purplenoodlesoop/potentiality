@@ -9,14 +9,17 @@
 , bytestring
 , exceptions
 , filepath
+, fsnotify
 , lib
 , optparse-applicative
 , path
 , path-io
 , random
+, stm
 , text
 , time
 , typed-process
+, unix
 , yaml
 }:
 mkDerivation {
@@ -32,13 +35,16 @@ mkDerivation {
     bytestring
     exceptions
     filepath
+    fsnotify
     optparse-applicative
     path
     path-io
     random
+    stm
     text
     time
     typed-process
+    unix
     yaml
   ];
   executableHaskellDepends = [

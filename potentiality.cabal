@@ -56,6 +56,7 @@ library
     Potentiality.Vault.Scan
     Potentiality.Version
     Potentiality.Wait
+    Potentiality.Watch
   build-depends:
     , aeson                 >= 2.1
     , aeson-pretty
@@ -63,13 +64,16 @@ library
     , bytestring
     , exceptions
     , filepath
+    , fsnotify
     , optparse-applicative  >= 0.18
     , path
     , path-io
     , random
+    , stm
     , text
     , time
     , typed-process
+    , unix
     , yaml
 
 executable pot
