@@ -43,8 +43,11 @@ library
   exposed-modules:
     Potentiality
     Potentiality.Atomic
+    Potentiality.ClaudeCode
     Potentiality.CLI
+    Potentiality.Kind
     Potentiality.Meta
+    Potentiality.StreamJson
     Potentiality.Task
     Potentiality.Task.Parse
     Potentiality.Task.Write
@@ -59,12 +62,14 @@ library
     , base                  >= 4.18 && < 5
     , bytestring
     , exceptions
+    , filepath
     , optparse-applicative  >= 0.18
     , path
     , path-io
     , random
     , text
     , time
+    , typed-process
     , yaml
 
 executable pot

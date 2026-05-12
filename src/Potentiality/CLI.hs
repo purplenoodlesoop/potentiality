@@ -22,10 +22,11 @@ import Data.Time (UTCTime, getCurrentTime)
 import Data.Version (showVersion)
 import Data.Yaml qualified as Yaml
 import Options.Applicative
-import Path (Abs, Dir, File, Path, filename, parent, parseAbsDir, parseRelFile, toFilePath, (</>))
+import Path (Abs, Dir, File, Path, Rel, filename, parent, parseAbsDir, parseAbsFile, parseRelFile, toFilePath, (</>))
 import Path qualified
 import Path.IO (doesDirExist, doesFileExist, ensureDir, getCurrentDir, listDir)
 import Potentiality.Atomic (atomicWriteBinaryFile)
+import Potentiality.ClaudeCode (runClaude)
 import Potentiality.Meta
   ( Meta (..)
   , PlanDecision (..)
@@ -89,6 +90,7 @@ data DoCommand
   | DoAnswer DoAnswerOpts
   | DoApprove DoApproveOpts
   | DoTail DoTailOpts
+  | DoRun DoRunOpts
 
 data AgentCommand
   = AgentAsk AgentAskOpts
@@ -156,6 +158,11 @@ data DoTailOpts = DoTailOpts
   , dtTail :: Int
   }
 
+data DoRunOpts = DoRunOpts
+  { drTaskFile :: FilePath
+  , drVault :: Maybe FilePath
+  }
+
 data AgentAskOpts = AgentAskOpts
   { aaQuestion :: Text
   , aaOptions :: Maybe Text
@@ -199,6 +206,7 @@ doParser =
         <> command "answer" (info (DoAnswer <$> doAnswerOpts) (progDesc "Write a question's answer"))
         <> command "approve" (info (DoApprove <$> doApproveOpts) (progDesc "Approve/revise/reject a pending plan"))
         <> command "tail" (info (DoTail <$> doTailOpts) (progDesc "Show the tail of a task's transcript"))
+        <> command "run" (info (DoRun <$> doRunOpts) (progDesc "Run a task to completion (spawns claude)"))
     )
 
 agentParser :: Parser AgentCommand
@@ -326,6 +334,12 @@ doTailOpts =
     <*> vaultOption
     <*> option auto (long "tail" <> short 'n' <> metavar "N" <> value 50 <> showDefault <> help "Number of trailing lines")
 
+doRunOpts :: Parser DoRunOpts
+doRunOpts =
+  DoRunOpts
+    <$> strArgument (metavar "TASK_FILE" <> help "Path to a task.md file inside a vault")
+    <*> vaultOption
+
 -- ---------------------------------------------------------------------------
 -- Dispatch
 
@@ -341,6 +355,7 @@ run = do
     CmdDo (DoAnswer o) -> doAnswer o
     CmdDo (DoApprove o) -> doApprove o
     CmdDo (DoTail o) -> doTail o
+    CmdDo (DoRun o) -> doRun o
     CmdAgent (AgentAsk o) -> agentAsk o
     CmdAgent (AgentStatus t) -> agentStatus t
     CmdAgent (AgentNote t) -> agentNote t
@@ -539,6 +554,30 @@ doTail o = do
   let tid = TaskId (dtId o)
   txt <- readTranscriptTail vault tid (dtTail o)
   TIO.putStr txt
+
+doRun :: DoRunOpts -> IO ()
+doRun o = do
+  taskFP <- parseAbsFile' (drTaskFile o)
+  let taskDirP = parent taskFP
+      tasksDirP = parent taskDirP
+      vaultRoot = parent tasksDirP
+      tidTxt = T.dropWhileEnd (== '/') (T.pack (toFilePath (Path.dirname taskDirP)))
+      tid = TaskId tidTxt
+  vault <- case drVault o of
+    Just _ -> resolveVault (drVault o)
+    Nothing -> pure (Vault vaultRoot)
+  task <- readTask vault tid
+  runClaude vault task
+
+parseAbsFile' :: FilePath -> IO (Path Abs File)
+parseAbsFile' fp =
+  case (parseAbsFile fp :: Maybe (Path Abs File)) of
+    Just p -> pure p
+    Nothing -> case (parseRelFile fp :: Maybe (Path Rel File)) of
+      Just rel -> do
+        cwd <- getCurrentDir
+        pure (cwd </> rel)
+      Nothing -> die ("not a valid file path: " <> fp)
 
 -- ---------------------------------------------------------------------------
 -- Handlers: pot agent *

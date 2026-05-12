@@ -23,6 +23,8 @@ module Potentiality.Task
   , PermissionMode (..)
   , permissionModeText
   , parsePermissionMode
+  -- already exported above, but make sure 'permissionModeText' is the
+  -- canonical surface for downstream modules.
   , PlanApproval (..)
   , planApprovalText
   , parsePlanApproval
