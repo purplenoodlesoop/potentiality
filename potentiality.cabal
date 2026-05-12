@@ -1,0 +1,58 @@
+cabal-version:      3.0
+name:               potentiality
+version:            0.1.0.0
+synopsis:           Haskell agent runner over a Markdown vault.
+description:
+  A self-hosted Haskell binary that watches a Markdown vault, claims tasks
+  marked `ready`, runs Claude Code against them, and writes the result back
+  into the same vault. See the spec/ directory for the full design.
+
+license:            MIT
+license-file:       LICENSE
+author:             Yakov Karpov
+maintainer:         yakovkarpoff@gmail.com
+homepage:           https://github.com/purplenoodlesoop/potentiality
+bug-reports:        https://github.com/purplenoodlesoop/potentiality/issues
+category:           Development
+build-type:         Simple
+
+extra-source-files:
+  README.md
+  spec/**/*.md
+
+common shared
+  default-language:   GHC2021
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wno-unused-imports
+  default-extensions:
+    DerivingStrategies
+    LambdaCase
+    OverloadedStrings
+    StrictData
+
+library
+  import:          shared
+  hs-source-dirs:  src
+  exposed-modules:
+    Potentiality
+    Potentiality.Version
+  build-depends:
+    , base                  >= 4.18 && < 5
+    , optparse-applicative  >= 0.18
+    , text
+
+executable pot
+  import:         shared
+  hs-source-dirs: app
+  main-is:        Main.hs
+  build-depends:
+    , base
+    , potentiality
+  ghc-options:    -threaded -rtsopts -with-rtsopts=-N
