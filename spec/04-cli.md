@@ -2,7 +2,7 @@
 
 `pot` is the single binary. It has two top-level groups:
 
-- **`pot do *`** — orchestrator/human side. Things you run from a shell or that Horizon shells out to.
+- **`pot do *`** — orchestrator/human side. Things you run from a shell or that the chat client shells out to.
 - **`pot agent *`** — agent side. Things Claude Code invokes through its built-in `Bash` tool.
 
 The split is for clarity and discoverability; there is no enforcement. A human can run `pot agent ask` to test the IPC; an agent could technically run `pot do list`. The convention guides users, not the binary.
@@ -60,7 +60,7 @@ Create a new task file. Generates a ULID, writes `vault/tasks/<ulid>/task.md` wi
 pot do new --kind research --title "Investigate X" -- "Find out how X works ..."
 ```
 
-This is the command Horizon will mostly use. Returns the new ULID on stdout.
+This is the command the chat client will mostly use. Returns the new ULID on stdout.
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -114,7 +114,7 @@ Cancel a running task. Touches `vault/tasks/<id>/CANCEL`; the watching `pot do w
 
 ### `pot do answer <id> <question-num> -- <answer...>`
 
-Manually answer a pending question from the CLI (Horizon's normal path is to write the answer file directly).
+Manually answer a pending question from the CLI (the chat client's normal path is to write the answer file directly).
 
 ```
 pot do answer 01HE... 1 -- "CLI"
@@ -194,14 +194,14 @@ Mark `status: blocked`. Used when Claude cannot proceed and needs human interven
 |---|---|---|---|---|---|
 | do | `run` | yes | everything in task dir | task.md | human, CI |
 | do | `watch` | yes (long) | many tasks | vault/tasks/ | systemd, human |
-| do | `new` | no | task.md | — | Horizon, human |
-| do | `ready` | no | task.md (frontmatter) | task.md | Horizon, human |
-| do | `list` | no | — | tasks/ | Horizon, human |
-| do | `show` | no | — | task dir | Horizon, human |
-| do | `tail` | yes (follow) | — | transcript.md | Horizon, human |
-| do | `kill` | no | CANCEL | — | Horizon, human |
-| do | `answer` | no | questions/NNN.answer.md | questions/NNN.md | Horizon, human |
-| do | `approve` | no | meta.yaml | plan.md | Horizon, human |
+| do | `new` | no | task.md | — | chat client, human |
+| do | `ready` | no | task.md (frontmatter) | task.md | chat client, human |
+| do | `list` | no | — | tasks/ | chat client, human |
+| do | `show` | no | — | task dir | chat client, human |
+| do | `tail` | yes (follow) | — | transcript.md | chat client, human |
+| do | `kill` | no | CANCEL | — | chat client, human |
+| do | `answer` | no | questions/NNN.answer.md | questions/NNN.md | chat client, human |
+| do | `approve` | no | meta.yaml | plan.md | chat client, human |
 | do | `gc` | no | (removes files) | tasks/ | cron, human |
 | agent | `ask` | **yes** | questions/NNN.md | questions/NNN.answer.md | claude |
 | agent | `status` | no | meta.yaml | — | claude |

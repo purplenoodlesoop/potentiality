@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Potentiality — a Markdown vault that runs Claude Code</title>
+  <meta name="description" content="A single Haskell binary that watches a directory of Markdown task files, claims any task marked ready, runs claude -p, and writes the result back into the vault.">
+  <style>
+    :root {
+      --bg:        #14101c;
+      --bg-sunk:   #0e0a16;
+      --fg:        #ece6f7;
+      --fg-dim:    #a89cc4;
+      --fg-faint:  #6f6586;
+      --rule:      #2a2238;
+      --accent:    #b58bff;
+      --accent-2:  #8a5dff;
+      --accent-3:  #d9c6ff;
+      --warn:      #ffb46b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:        #f7f3ff;
+        --bg-sunk:   #efe7ff;
+        --fg:        #1c1430;
+        --fg-dim:    #4a3a6c;
+        --fg-faint:  #877aa1;
+        --rule:      #d6c8ee;
+        --accent:    #6b3fde;
+        --accent-2:  #4a26b3;
+        --accent-3:  #2a1574;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+      font-size: 15px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); }
+    a:hover { color: var(--accent-3); border-bottom-color: var(--accent-3); }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 56px 24px 72px;
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+    .logo {
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--accent);
+    }
+    .logo::before {
+      content: "▮ ";
+      color: var(--accent-2);
+    }
+    .tagline {
+      color: var(--fg-dim);
+      font-size: 13px;
+    }
+    .status {
+      margin-left: auto;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--warn);
+      padding: 3px 8px;
+      border: 1px solid var(--warn);
+      border-radius: 3px;
+      opacity: 0.8;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      line-height: 1.25;
+      letter-spacing: -0.015em;
+      margin: 0 0 16px;
+      color: var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Inter", sans-serif;
+    }
+    h1 .accent { color: var(--accent); }
+    .lede {
+      color: var(--fg-dim);
+      font-size: 15px;
+      margin: 0 0 36px;
+      max-width: 60ch;
+    }
+    h2 {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--fg-faint);
+      margin: 40px 0 14px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--rule);
+    }
+    code, pre {
+      font-family: inherit;
+      font-size: 13px;
+    }
+    pre {
+      background: var(--bg-sunk);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+      color: var(--fg);
+    }
+    .prompt { color: var(--accent); user-select: none; }
+    .flag   { color: var(--accent-3); }
+    .str    { color: var(--warn); }
+    .cmt    { color: var(--fg-faint); }
+    .key    { color: var(--accent); }
+    .num    { color: var(--accent-3); }
+
+    .steps {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0;
+      counter-reset: step;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .steps li {
+      counter-increment: step;
+      padding: 14px 0 14px 36px;
+      position: relative;
+      border-bottom: 1px dashed var(--rule);
+    }
+    .steps li:last-child { border-bottom: none; }
+    .steps li::before {
+      content: counter(step, decimal-leading-zero);
+      position: absolute;
+      left: 0; top: 14px;
+      color: var(--accent-2);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .steps b { color: var(--fg); font-weight: 600; }
+    .steps span { color: var(--fg-dim); }
+
+    .flow {
+      font-size: 11.5px;
+      line-height: 1.7;
+      color: var(--fg-dim);
+      white-space: pre;
+      overflow-x: auto;
+      padding: 14px 16px;
+      background: var(--bg-sunk);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      margin: 12px 0;
+    }
+    .flow .b { color: var(--accent); }
+
+    .ko {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      margin: 12px 0;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .ko > div {
+      flex: 1 1 50%;
+      padding: 12px 16px;
+      min-width: 220px;
+    }
+    .ko > div + div { border-left: 1px solid var(--rule); }
+    @media (max-width: 540px) {
+      .ko > div + div { border-left: none; border-top: 1px solid var(--rule); }
+    }
+    .ko h3 {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+      color: var(--fg-faint);
+    }
+    .ko ul {
+      margin: 0; padding: 0; list-style: none;
+      color: var(--fg-dim);
+      font-size: 13px;
+    }
+    .ko ul li { padding: 2px 0; }
+    .ko ul li::before {
+      content: "+ ";
+      color: var(--accent);
+    }
+    .ko .no ul li::before {
+      content: "− ";
+      color: var(--fg-faint);
+    }
+
+    footer {
+      margin-top: 56px;
+      padding-top: 18px;
+      border-top: 1px solid var(--rule);
+      color: var(--fg-faint);
+      font-size: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      justify-content: space-between;
+    }
+    footer .links a { margin-right: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="logo">potentiality</div>
+      <div class="tagline">a vault that runs Claude Code</div>
+      <div class="status">pre-alpha</div>
+    </header>
+
+    <h1>Markdown files in.<br><span class="accent">Markdown files out.</span><br>Claude in between.</h1>
+
+    <p class="lede">
+      A single Haskell binary watches a directory of task files, claims any one marked
+      <code>ready</code>, runs <code>claude -p</code> against the working directory it names,
+      and writes the result back into the same vault. No server. No database. No MCP.
+    </p>
+
+    <h2>The whole protocol</h2>
+<pre><span class="cmt"># 1. drop a task in the vault</span>
+<span class="prompt">$</span> pot do new <span class="flag">--kind</span> research <span class="flag">--status</span> ready -- \
+    <span class="str">"How does fsnotify behave under APFS on macOS?"</span>
+01HXR2N7Z3WBT4VQK0S1FYEZ0M
+
+<span class="cmt"># 2. run the watcher (or let systemd do it)</span>
+<span class="prompt">$</span> pot do watch <span class="flag">--vault</span> ./vault
+
+<span class="cmt"># 3. read what came back</span>
+<span class="prompt">$</span> cat vault/tasks/01HXR.../findings.md
+</pre>
+
+    <h2>What the vault looks like</h2>
+<pre>vault/tasks/01HXR2N7Z3.../
+├── <span class="key">task.md</span>          <span class="cmt"># the prompt + frontmatter</span>
+├── <span class="key">transcript.md</span>    <span class="cmt"># everything Claude did, in order</span>
+├── <span class="key">findings.md</span>      <span class="cmt"># the answer (for research / design)</span>
+├── <span class="key">plan.md</span>          <span class="cmt"># proposed plan (delegate mode)</span>
+├── <span class="key">questions/</span>
+│   ├── 001.md       <span class="cmt"># Claude asks</span>
+│   └── 001.answer.md  <span class="cmt"># you (or your chat bot) reply</span>
+└── <span class="key">meta.yaml</span>        <span class="cmt"># session id, cost, tokens, thread binding</span></pre>
+
+    <h2>How a task moves</h2>
+<div class="flow">  inbox  →  ready  →  <span class="b">in_progress</span>  →  done
+                                  ↓
+                                blocked  (CANCEL, crash, or pot agent blocked)</div>
+
+    <h2>Human-in-the-loop, by default</h2>
+    <p class="lede" style="margin:0 0 8px">
+      Claude can stop mid-task and ask for a decision. <code>pot agent ask</code> writes a
+      question file and blocks until you answer — from a terminal, an editor, or a chat
+      bot watching the same directory.
+    </p>
+<pre><span class="cmt"># inside the spawned claude:</span>
+<span class="prompt">$</span> pot agent ask <span class="str">"Should this ship as a CLI or a daemon?"</span> \
+    <span class="flag">--options</span> <span class="str">"cli,daemon,both"</span>
+<span class="cmt">(blocks until questions/001.answer.md appears)</span>
+cli</pre>
+
+    <h2>What's in / what's out</h2>
+    <div class="ko">
+      <div>
+        <h3>In</h3>
+        <ul>
+          <li>Vault = source of truth</li>
+          <li>Claude Code as the agent</li>
+          <li>Bash subcommands, no MCP</li>
+          <li>Single static binary, Nix-built</li>
+          <li>Whatever chat client you already run</li>
+        </ul>
+      </div>
+      <div class="no">
+        <h3>Out</h3>
+        <ul>
+          <li>Server, database, web UI</li>
+          <li>SSH workers, multi-host</li>
+          <li>Linear / GitHub Issues sync</li>
+          <li>Token-by-token streaming to chat</li>
+          <li>Anything aimed at a team</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>The chat surface is yours</h2>
+    <p class="lede" style="margin:0">
+      Mobile and desktop interaction goes through any vault-aware chat client.
+      <a href="https://github.com/purplenoodlesoop/horizon">Horizon</a> (Telegram-native)
+      and <a href="https://github.com/openclaw/openclaw">OpenClaw</a> (multi-channel) are
+      the two reference integrations; anything that can watch files and run bash
+      can play the role. Potentiality doesn't know whether a chat surface exists.
+    </p>
+
+    <h2>Run it</h2>
+<pre><span class="prompt">$</span> nix run github:purplenoodlesoop/potentiality -- --version</pre>
+
+    <footer>
+      <div class="links">
+        <a href="https://github.com/purplenoodlesoop/potentiality">github</a>
+        <a href="https://github.com/purplenoodlesoop/potentiality/tree/main/spec">spec</a>
+        <a href="https://github.com/purplenoodlesoop/potentiality/blob/main/LIMITATIONS.md">limitations</a>
+      </div>
+      <div>MIT · one person's tooling, made public</div>
+    </footer>
+  </main>
+</body>
+</html>

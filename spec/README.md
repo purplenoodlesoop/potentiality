@@ -2,7 +2,7 @@
 
 Draft v0 · 2026-05-13
 
-Potentiality is a Haskell program that takes Markdown task files out of a vault, runs Claude Code against them, and writes the result back. It is the "agent runner" half of an OpenAI-Symphony–style orchestration model, deliberately stripped of every service, database, and protocol Symphony added to serve teams. The chat/management surface is delegated to [purplenoodlesoop/horizon](https://github.com/purplenoodlesoop/horizon), which already runs a Telegram bot on top of the same vault.
+Potentiality is a Haskell program that takes Markdown task files out of a vault, runs Claude Code against them, and writes the result back. It is the "agent runner" half of an OpenAI-Symphony–style orchestration model, deliberately stripped of every service, database, and protocol Symphony added to serve teams. The chat/management surface is delegated to any vault-aware chat client — [`purplenoodlesoop/horizon`](https://github.com/purplenoodlesoop/horizon) (Telegram-native) and [`openclaw/openclaw`](https://github.com/openclaw/openclaw) (multi-channel) are the two reference integrations; see [08-chat-client-integration.md](./08-chat-client-integration.md) for the contract.
 
 ## Table of contents
 
@@ -16,7 +16,7 @@ Potentiality is a Haskell program that takes Markdown task files out of a vault,
 | [05-hitl.md](./05-hitl.md) | Human-in-the-loop protocol |
 | [06-claude-code-backend.md](./06-claude-code-backend.md) | How `pot` drives Claude Code |
 | [07-task-kinds.md](./07-task-kinds.md) | `code` / `research` / `design` / `review` / `general` |
-| [08-horizon-integration.md](./08-horizon-integration.md) | What Horizon needs to do |
+| [08-chat-client-integration.md](./08-chat-client-integration.md) | What any chat client (Horizon, OpenClaw, …) needs to do |
 | [09-provisioning.md](./09-provisioning.md) | Nix flake + `core-flake` |
 | [10-non-goals.md](./10-non-goals.md) | Things deliberately not built |
 | [99-references.md](./99-references.md) | Sources |

@@ -1,12 +1,12 @@
 # 03 — Vault layout
 
-This document defines the on-disk schema. It is the contract between Horizon, `pot`, and humans editing files by hand. Backwards-incompatible changes to this layout MUST bump a version field in `task.md` frontmatter.
+This document defines the on-disk schema. It is the contract between the chat client (Horizon, OpenClaw, …), `pot`, and humans editing files by hand. Backwards-incompatible changes to this layout MUST bump a version field in `task.md` frontmatter.
 
 ## Top-level shape
 
 ```
 <vault>/
-├── _horizon/                 # owned by Horizon (capabilities, system prompts, env, allowlist)
+├── <client-private>/         # owned by the chat client (e.g. _horizon/, _openclaw/, …)
 └── tasks/
     └── <ulid>/               # one directory per task
         ├── task.md           # required; the task itself
@@ -27,9 +27,9 @@ Files marked optional are not created until the relevant kind of activity happen
 
 ## ULIDs as task IDs
 
-Task directories are named with [ULID](https://github.com/ulid/spec) strings (26 chars, base32, time-ordered). Rationale: time-sorted so `ls -1` shows oldest first; URL-safe; collision-free under concurrent writes from Horizon and a human.
+Task directories are named with [ULID](https://github.com/ulid/spec) strings (26 chars, base32, time-ordered). Rationale: time-sorted so `ls -1` shows oldest first; URL-safe; collision-free under concurrent writes from a chat client and a human.
 
-Horizon's `pot do new` helper generates the ULID. Hand-edited tasks MAY use any unique directory name (no enforcement).
+`pot do new` generates the ULID (whether invoked by the chat client or a human shell). Hand-edited tasks MAY use any unique directory name (no enforcement).
 
 ## `task.md`
 
@@ -63,9 +63,9 @@ allowed_tools:               # overrides kind default; comma-joined into `--allo
   - Edit
   - WebSearch
 plan_approval: required      # required | skipped; for mode=delegate
-telegram:                    # filled by Horizon when task is bot-created
-  chat_id: 12345
-  thread_id: 678
+telegram:                    # filled by the chat client when task is bot-created;
+  chat_id: 12345             # field name is conventional, not enforced — a Slack
+  thread_id: 678             # client might write a `slack:` block instead
 labels: []                   # free-form tags, surfaced in lists
 ```
 
@@ -118,7 +118,7 @@ Optional raw stream-json log, one event per line. Enabled by `pot do watch --raw
 
 ## `plan.md`
 
-Used when `mode: delegate`. Written by Claude via `pot agent plan "..."`. Format is free-form Markdown. Horizon detects creation and surfaces it for `Approve / Revise / Reject`. The user's decision is recorded by Horizon writing into `meta.yaml#plan_decision`.
+Used when `mode: delegate`. Written by Claude via `pot agent plan "..."`. Format is free-form Markdown. The chat client detects creation and surfaces it for `Approve / Revise / Reject`. The user's decision is recorded by the client writing into `meta.yaml#plan_decision`.
 
 ```yaml
 # meta.yaml after approval
@@ -139,14 +139,14 @@ Reserved for v2. Mid-task redirect channel. Files are timestamp-named Markdown d
 
 ## `questions/`
 
-Each question is a pair: `NNN.md` (written by Claude via `pot agent ask`) and `NNN.answer.md` (written by Horizon/user). `NNN` is zero-padded 3-digit, monotonically increasing per task.
+Each question is a pair: `NNN.md` (written by Claude via `pot agent ask`) and `NNN.answer.md` (written by the chat client / user). `NNN` is zero-padded 3-digit, monotonically increasing per task.
 
 ```yaml
 # questions/001.md
 ---
 asked_at: 2026-05-13T10:05:00Z
 urgency: normal              # normal | high
-options:                     # optional; if present, rendered as buttons by Horizon
+options:                     # optional; if present, rendered as buttons by the chat client
   - CLI
   - server
   - both
@@ -160,7 +160,7 @@ Which shape should Potentiality take? See task body for context.
 CLI
 ```
 
-Answer file body is the answer verbatim. Whitespace-trimmed by `pot agent ask` before being returned to Claude. For multi-line answers (no options), Horizon writes the entire user reply.
+Answer file body is the answer verbatim. Whitespace-trimmed by `pot agent ask` before being returned to Claude. For multi-line answers (no options), the chat client writes the entire user reply.
 
 ## `CANCEL`
 
@@ -169,7 +169,7 @@ Empty file. Presence signals "kill this task." `pot` watches each in-progress ta
 ## State machine
 
 ```
-                 (Horizon /
+                 (chat client /
                   hand edit)
 inbox ────────────────────────▶ ready
                                   │
@@ -186,19 +186,19 @@ Transitions:
 
 | From → To | Trigger | Writer |
 |---|---|---|
-| (none) → inbox | new file created | Horizon or human |
-| inbox → ready | promotion | Horizon (`pot do ready <id>`) or human |
+| (none) → inbox | new file created | chat client or human |
+| inbox → ready | promotion | chat client (`pot do ready <id>`) or human |
 | ready → in_progress | atomic claim | `pot do watch` |
 | in_progress → done | `result` event from Claude | `pot do watch` |
 | in_progress → blocked | `pot agent blocked`, crash, CANCEL | `pot do watch` |
-| blocked → ready | manual restart | human or Horizon |
+| blocked → ready | manual restart | human or chat client |
 | done → ready | manual re-run | human (rare; typically a new task is preferred) |
 
 ## Concurrency rules
 
 - **Single-writer-daemon discipline.** Only one `pot do watch` per vault. Two would race on claim and could over-spawn.
-- **Claim is a frontmatter mutation + git commit.** The commit message is `pot: claim <ulid>`. If git's optimistic check fails (because Horizon committed first), `pot` re-reads the file; if `agent_owner` is now set, the task is taken — skip.
-- **Horizon never sets `agent_owner`** or `status: in_progress`. It only ever creates files, sets `status: ready`, or writes question answers / plan decisions. This makes the writer split unambiguous.
+- **Claim is a frontmatter mutation + git commit.** The commit message is `pot: claim <ulid>`. If git's optimistic check fails (because the chat client committed first), `pot` re-reads the file; if `agent_owner` is now set, the task is taken — skip.
+- **The chat client never sets `agent_owner`** or `status: in_progress`. It only ever creates files, sets `status: ready`, or writes question answers / plan decisions. This makes the writer split unambiguous.
 - **Humans editing tasks in-progress** are advised to set `status: blocked` first, edit, then `status: ready`. The daemon does not enforce this; if it sees a body change mid-run, it logs to `transcript.md` and keeps going.
 
 ## Git

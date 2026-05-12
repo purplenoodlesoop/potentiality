@@ -36,7 +36,7 @@ Symphony has a `worker_host` model where tasks can run on different machines ove
 
 No Servant, no LiveView, no built-in HTML viewer. Inspection is via `pot do list`, `pot do show`, `pot do tail`, or by reading the vault with Obsidian / Working Copy / `cat`.
 
-**Why:** the vault is already a UI for desktop (any editor). Telegram is already a UI for mobile (via Horizon). A web dashboard would be a third UI for the same data. If `pot do show` output ever feels limiting, ship a `pot do show --format html` flag — still no server.
+**Why:** the vault is already a UI for desktop (any editor). The chat client (Horizon, OpenClaw, …) is already a UI for mobile. A web dashboard would be a third UI for the same data. If `pot do show` output ever feels limiting, ship a `pot do show --format html` flag — still no server.
 
 ## No tracker integrations (Linear, GitHub Issues, Jira) in v1
 
@@ -52,7 +52,7 @@ The `AgentBackend` typeclass exists in the code (so Codex/Aider/Gemini adapters 
 
 ## No real-time progress UI for the user
 
-Token-level streaming reaches `transcript.md` as it happens, but Horizon only ships one notification per question/plan/status-change, not continuous streaming to Telegram (which would be obnoxious).
+Token-level streaming reaches `transcript.md` as it happens, but the chat client only ships one notification per question/plan/status-change, not continuous streaming (which would be obnoxious).
 
 **Why:** "look at the transcript when you care" is a better UX than "ping ping ping." A `pot do tail --follow` on the server gives full real-time view for when you do care.
 

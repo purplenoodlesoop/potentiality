@@ -2,7 +2,7 @@
 
 ## Elevator pitch
 
-> Potentiality is a single static Haskell binary that watches a directory of Markdown task files, claims any task marked `ready`, runs `claude -p` against the named working directory, and writes the result back into the same vault. Mobile and desktop interaction happens through Horizon's existing Telegram bot, which lives on the same vault. No server, no database, no MCP.
+> Potentiality is a single static Haskell binary that watches a directory of Markdown task files, claims any task marked `ready`, runs `claude -p` against the named working directory, and writes the result back into the same vault. Mobile and desktop interaction goes through whatever vault-aware chat client you already run — Horizon, OpenClaw with a small skill, anything that can watch a directory of files. No server, no database, no MCP.
 
 ## Audience
 
@@ -14,15 +14,15 @@ Potentiality is explicitly **not** aimed at teams. A team operating a Linear boa
 
 ```
 ┌────────────────┐                       ┌─────────────────────────┐
-│ phone / desk   │ ─────Telegram────▶   │ Horizon (Dart binary)   │
-│                │                       │  · bot                  │
-│                │ ──Obsidian / git──▶  │  · bash command tools   │
+│ phone / desk   │ ─────chat────────▶   │ chat client             │
+│                │                       │  (Horizon / OpenClaw /  │
+│                │ ──editor / git───▶   │   anything vault-aware) │
 └────────────────┘                       └────────┬────────────────┘
                                                   │ reads/writes
                                                   ▼
                                          ┌─────────────────────────┐
                                          │ vault/                  │
-                                         │  ├ _horizon/...         │
+                                         │  ├ <client-private>/    │
                                          │  └ tasks/<ulid>/        │ ← single source of truth
                                          │     ├ task.md           │
                                          │     ├ transcript.md     │
@@ -51,15 +51,15 @@ Potentiality is explicitly **not** aimed at teams. A team operating a Linear boa
                                          └─────────────────────────┘
 ```
 
-The vault is the only thing that crosses process boundaries. Horizon and `pot` never call each other.
+The vault is the only thing that crosses process boundaries. The chat client and `pot` never call each other directly.
 
 ## What makes Potentiality different from Symphony
 
 1. **No server**, no Postgres, no LiveView, no SSH workers. A single binary plus a directory.
 2. **The tracker is the vault**, not Linear. Markdown files with YAML frontmatter.
-3. **The chat UI is Horizon**, not a dashboard. Telegram + Obsidian.
+3. **The chat UI is whatever you already run** (Horizon, OpenClaw, …), not a dashboard. Telegram, Slack, Discord — Potentiality doesn't care which one.
 4. **The agent is Claude Code**, not Codex. Driven by `claude -p --output-format=stream-json`.
-5. **Human-in-the-loop is first-class**, not a state-machine afterthought. Claude calls `pot agent ask` mid-task; the question reaches your phone; your reply unblocks it.
+5. **Human-in-the-loop is first-class**, not a state-machine afterthought. Claude calls `pot agent ask` mid-task; the question reaches your phone via your chat client; your reply unblocks it.
 
 ## What it borrows from Symphony
 
