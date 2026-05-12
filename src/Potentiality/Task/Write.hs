@@ -26,6 +26,7 @@ import Path.IO (doesFileExist)
 import Potentiality.Atomic (atomicWriteBinaryFile)
 import Potentiality.Task (Frontmatter, Task (..), TaskId)
 import Potentiality.Task.Parse (ParseError, parseTaskFile)
+import Potentiality.TaskLock (withTaskLock)
 import Potentiality.Vault (Vault, taskFile)
 
 -- | Pure rendering of a 'Task' into the canonical on-disk byte sequence.
@@ -78,9 +79,14 @@ readTaskMaybe vault tid = do
     then pure Nothing
     else Just <$> parseTaskFile tid (toFilePath fp)
 
--- | Atomically read, transform, and re-write a 'Task'.
+-- | Atomically read, transform, and re-write a 'Task'. Holds the
+-- per-task lock for the duration to serialize against any concurrent
+-- 'Potentiality.Meta.mutateMeta' or other 'mutateTask' in another
+-- process (e.g. agent-side @pot agent done@).
 mutateTask :: Vault -> TaskId -> (Task -> Task) -> IO ()
-mutateTask vault tid f = readTask vault tid >>= writeTaskFile vault . f
+mutateTask vault tid f =
+  withTaskLock vault tid $
+    readTask vault tid >>= writeTaskFile vault . f
 
 -- | Mutate just the frontmatter, preserving the body verbatim.
 mutateFrontmatter :: Vault -> TaskId -> (Frontmatter -> Frontmatter) -> IO ()

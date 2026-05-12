@@ -38,6 +38,7 @@ import Path (toFilePath)
 import Path.IO (doesFileExist)
 import Potentiality.Atomic (atomicWriteBinaryFile)
 import Potentiality.Task (TaskId)
+import Potentiality.TaskLock (withTaskLock)
 import Potentiality.Vault (Vault, metaFile)
 
 -- | Session bookkeeping. Every field is optional because a task starts
@@ -205,6 +206,6 @@ writeMeta vault tid m = do
   atomicWriteBinaryFile fp (Yaml.encode m)
 
 mutateMeta :: Vault -> TaskId -> (Meta -> Meta) -> IO ()
-mutateMeta vault tid f = do
+mutateMeta vault tid f = withTaskLock vault tid $ do
   m <- readMetaOrEmpty vault tid
   writeMeta vault tid (f m)

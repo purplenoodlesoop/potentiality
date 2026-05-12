@@ -8,6 +8,9 @@ module Potentiality.ClaudeCode
   ( runClaude
   ) where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (withAsync)
+import Control.Exception (IOException, catch)
 import Control.Monad (unless)
 import Data.Aeson (eitherDecodeStrict)
 import Data.ByteString qualified as BS
@@ -16,9 +19,8 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Time (getCurrentTime)
-import Path (Abs, Dir, Path, parent, parseAbsDir, toFilePath)
-import Path.IO (ensureDir)
-import Potentiality.Atomic (atomicWriteBinaryFile)
+import Path (Abs, File, Path, toFilePath)
+import Path.IO (doesFileExist, ensureDir)
 import Potentiality.Kind (KindSpec (..), basePromptPreamble, kindSpec)
 import Potentiality.Meta (Meta (..), Tokens (..), mutateMeta)
 import Potentiality.StreamJson
@@ -32,7 +34,7 @@ import Potentiality.StreamJson
   )
 import Potentiality.Task (Frontmatter (..), Mode (..), Status (..), Task (..), TaskId (..), permissionModeText)
 import Potentiality.Task.Write (mutateFrontmatter)
-import Potentiality.Vault (Vault (..), taskDir, transcriptFile, transcriptJsonlFile)
+import Potentiality.Vault (Vault (..), cancelFile, taskDir, transcriptFile, transcriptJsonlFile)
 import System.Environment (getEnvironment, getExecutablePath)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory)
@@ -40,10 +42,6 @@ import System.IO (Handle, hIsEOF)
 import System.Process.Typed qualified as P
 
 -- | Drive Claude Code for a single task to completion.
---
--- - working dir = @fmRepo@ when set, otherwise the task directory itself
--- - flags driven by 'kindSpec' \+ frontmatter overrides
--- - status: @InProgress@ on entry, @Done@\/@Blocked@ on exit
 runClaude :: Vault -> Task -> IO ()
 runClaude vault task = do
   let tid = taskId task
@@ -66,8 +64,6 @@ runClaude vault task = do
 
   envBase <- getEnvironment
   selfPath <- getExecutablePath
-  -- Prepend our own binary's directory so the spawned claude (and the
-  -- bash subcommands it invokes) finds the same `pot` we are.
   let selfDir = takeDirectory selfPath
       oldPath = maybe "" id (lookup "PATH" envBase)
       newPath = selfDir <> ":" <> oldPath
@@ -78,12 +74,7 @@ runClaude vault task = do
         ]
       envFinal = envExtras <> filter (\(k, _) -> k `notElem` map fst envExtras) envBase
 
-      -- NOTE: We intentionally do NOT pass `--bare`. It skips credential
-      -- discovery as well as hook/MCP/CLAUDE.md auto-discovery, so the
-      -- spawn ends up "Not logged in" even when the user has a working
-      -- subscription. We rely on --allowedTools instead to constrain the
-      -- tool surface. The cost is that the user's CLAUDE.md / hooks /
-      -- MCPs leak into spawns; for a single-user setup that's fine.
+      -- NOTE: deliberately no `--bare`; see spec/06 / LIMITATIONS.md.
       args =
         [ "-p"
         , "--output-format"
@@ -104,24 +95,34 @@ runClaude vault task = do
   mutateFrontmatter vault tid (\f -> f {fmStatus = InProgress})
   mutateMeta vault tid (\m -> m {metaStartedAt = Just startedAt})
 
+  cancelFp <- cancelFile vault tid
+
   let cfg =
-        P.setStdout P.createPipe $
-          P.setStderr P.inherit $
-            P.setWorkingDir workdir $
-              P.setEnv envFinal $
-                P.proc "claude" args
+        -- Close stdin so claude doesn't wait 3s for piped input that
+        -- never comes. The task body is passed via argv (after `--`),
+        -- so claude has no use for stdin.
+        P.setStdin P.closed $
+          P.setStdout P.createPipe $
+            P.setStderr P.inherit $
+              P.setWorkingDir workdir $
+                P.setEnv envFinal $
+                  P.proc "claude" args
 
   exitCode <-
-    P.withProcessWait cfg $ \p -> do
-      streamLoop vault tid (P.getStdout p)
-      P.waitExitCode p
+    P.withProcessWait cfg $ \p ->
+      -- Run streamLoop AND a CANCEL watcher concurrently. withAsync
+      -- cancels the watcher when streamLoop returns (claude exited
+      -- naturally). If the watcher trips first (CANCEL appeared), it
+      -- sends SIGTERM via stopProcess; claude's stdout closes;
+      -- streamLoop sees EOF and returns; everything unwinds.
+      withAsync (cancelWatcher cancelFp p) $ \_ -> do
+        streamLoop vault tid (P.getStdout p)
+        P.waitExitCode p
 
   finishedAt <- getCurrentTime
   case exitCode of
     ExitSuccess -> do
       mutateMeta vault tid (\m -> m {metaFinishedAt = Just finishedAt})
-      -- Default-flip to Done if the agent didn't call `pot agent done`
-      -- or `pot agent blocked`; respect any explicit terminal status.
       mutateFrontmatter vault tid $ \f -> case fmStatus f of
         InProgress -> f {fmStatus = Done}
         _ -> f
@@ -132,11 +133,20 @@ runClaude vault task = do
       BS.appendFile (toFilePath transcriptFp) $
         TE.encodeUtf8 ("\n## claude exited with code " <> T.pack (show code) <> "\n")
 
--- 'pot agent done' will normally have flipped to Done already, but
--- guard against tasks where the agent didn't call it: if status is
--- still InProgress after a clean exit, mark Done here.
--- (handled inline above for simplicity by only mutating to Blocked
--- on failure; clean exit keeps whatever the agent set)
+-- | Poll for the CANCEL file every 200 ms. On first appearance, send
+-- SIGTERM via 'P.stopProcess' (which also escalates to SIGKILL after
+-- 5 s if the process doesn't oblige). Loops forever; 'withAsync' kills
+-- this thread when the main work finishes.
+cancelWatcher :: Path Abs File -> P.Process stdin stdout stderr -> IO ()
+cancelWatcher cancelFp p = loop
+  where
+    loop = do
+      e <- doesFileExist cancelFp
+      if e
+        then P.stopProcess p
+        else do
+          threadDelay 200_000
+          loop
 
 modeTextOf :: Mode -> Text
 modeTextOf = \case
@@ -148,7 +158,14 @@ budgetArgs Nothing = []
 budgetArgs (Just b) = ["--max-budget-usd", show b]
 
 streamLoop :: Vault -> TaskId -> Handle -> IO ()
-streamLoop vault tid h = loop
+streamLoop vault tid h =
+  -- When the parent stopProcess closes the read pipe (CANCEL path),
+  -- a mid-read hGetLine throws an IOException. Treat that as EOF so
+  -- the caller still reaches waitExitCode and the ExitFailure branch
+  -- can flip status to Blocked. We don't lose any data — anything
+  -- claude wrote before being killed has already been flushed to
+  -- transcript.md / transcript.jsonl.
+  loop `catch` \(_ :: IOException) -> pure ()
   where
     loop = do
       eof <- hIsEOF h
@@ -180,17 +197,3 @@ handleSideEffects vault tid = \case
         , metaTokens = (\u -> Tokens (uInput u) (uOutput u) (uCacheRead u)) <$> riUsage ri
         }
   _ -> pure ()
-
--- Silence unused warnings for symbols intended for phase 7 (workspaces,
--- cancel handling).
-_unusedAbsDir :: Maybe (Path Abs Dir)
-_unusedAbsDir = parseAbsDir "/tmp/"
-
-_unusedAtomic :: Path Abs Dir -> IO ()
-_unusedAtomic _ = pure ()
-
-_unusedParent :: Path Abs Dir -> Path Abs Dir
-_unusedParent = parent
-
-_unusedAtomicWrite :: Path Abs Dir -> IO ()
-_unusedAtomicWrite _ = pure ()

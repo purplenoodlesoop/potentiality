@@ -14,6 +14,8 @@ Designed to be paired with [`purplenoodlesoop/horizon`](https://github.com/purpl
 
 See [`spec/`](./spec/) for the full design. Start with [`spec/README.md`](./spec/README.md) for the table of contents, [`spec/00-overview.md`](./spec/00-overview.md) for the elevator pitch, and [`spec/01-philosophy.md`](./spec/01-philosophy.md) for the rules that decide arguments.
 
+For what the implementation does *not* yet do, see [`LIMITATIONS.md`](./LIMITATIONS.md).
+
 ## Run
 
 ```

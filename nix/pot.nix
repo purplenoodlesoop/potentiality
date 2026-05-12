@@ -5,9 +5,11 @@
 { mkDerivation
 , aeson
 , aeson-pretty
+, async
 , base
 , bytestring
 , exceptions
+, filelock
 , filepath
 , fsnotify
 , lib
@@ -31,9 +33,11 @@ mkDerivation {
   libraryHaskellDepends = [
     aeson
     aeson-pretty
+    async
     base
     bytestring
     exceptions
+    filelock
     filepath
     fsnotify
     optparse-applicative

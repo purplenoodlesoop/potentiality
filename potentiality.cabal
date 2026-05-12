@@ -51,6 +51,7 @@ library
     Potentiality.Task
     Potentiality.Task.Parse
     Potentiality.Task.Write
+    Potentiality.TaskLock
     Potentiality.Ulid
     Potentiality.Vault
     Potentiality.Vault.Scan
@@ -60,9 +61,11 @@ library
   build-depends:
     , aeson                 >= 2.1
     , aeson-pretty
+    , async
     , base                  >= 4.18 && < 5
     , bytestring
     , exceptions
+    , filelock
     , filepath
     , fsnotify
     , optparse-applicative  >= 0.18
