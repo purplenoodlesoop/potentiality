@@ -4,6 +4,7 @@
 # transitively through apr-util on this revision; tracked separately).
 { mkDerivation
 , aeson
+, aeson-pretty
 , base
 , bytestring
 , exceptions
@@ -24,6 +25,7 @@ mkDerivation {
   isExecutable = true;
   libraryHaskellDepends = [
     aeson
+    aeson-pretty
     base
     bytestring
     exceptions

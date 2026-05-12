@@ -42,14 +42,19 @@ library
   hs-source-dirs:  src
   exposed-modules:
     Potentiality
+    Potentiality.Atomic
+    Potentiality.CLI
+    Potentiality.Meta
     Potentiality.Task
     Potentiality.Task.Parse
     Potentiality.Task.Write
     Potentiality.Ulid
     Potentiality.Vault
+    Potentiality.Vault.Scan
     Potentiality.Version
   build-depends:
     , aeson                 >= 2.1
+    , aeson-pretty
     , base                  >= 4.18 && < 5
     , bytestring
     , exceptions
