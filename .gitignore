@@ -1,0 +1,33 @@
+# Haskell
+dist/
+dist-newstyle/
+.ghc.environment.*
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+.cabal-sandbox/
+cabal.sandbox.config
+cabal.project.local
+cabal.project.local~
+
+# Nix
+result
+result-*
+.direnv/
+.envrc.local
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+*~
+
+# Local config
+.env
+.env.local
+
+# Per-machine Claude Code state (not part of the project)
+.claude/
