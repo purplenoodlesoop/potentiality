@@ -95,6 +95,19 @@ still `pending`, classify the reply text:
 - Negative (`no`, `cancel`, `reject`, `stop`) → `task_reject(id)`
 - Anything substantive otherwise → `task_revise(id, reply)`
 
+After `task_approve`, phrase the confirmation reply according to the
+task's `kind` (read from `tasks/<id>/task.md` frontmatter — do not
+guess):
+
+- `kind: code` → "The agent will now implement the plan."
+- `kind: research` → "The agent will now write up the research as `findings.md`."
+- `kind: design` → "The agent will now write the design doc as `findings.md`."
+- `kind: review` → "The agent will now write the review as `findings.md`."
+- `kind: general` → "The agent will now proceed."
+
+Do not say "implementing" for non-`code` kinds — design/research/review
+tasks produce a document (`findings.md`), not a code change.
+
 ### Ambiguity
 
 If multiple tasks in this chat have pending state, ask the user to
