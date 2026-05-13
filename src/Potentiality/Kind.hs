@@ -66,7 +66,7 @@ kindSpec = \case
     KindSpec
       { ksTools = ["Bash(pot agent *)", "Bash", "Read", "Edit", "Write", "Grep", "Glob"]
       , ksDefaultMode = Delegate
-      , ksDefaultPermission = PMAcceptEdits
+      , ksDefaultPermission = PMBypassPermissions
       , ksPromptAddendum =
           "This is a `code` task. You are operating in a working\n\
           \repository at $PWD.\n\
@@ -83,7 +83,7 @@ kindSpec = \case
     KindSpec
       { ksTools = ["Bash(pot agent *)", "Read", "WebSearch", "WebFetch", "Task"]
       , ksDefaultMode = Ask
-      , ksDefaultPermission = PMDefault
+      , ksDefaultPermission = PMBypassPermissions
       , ksPromptAddendum =
           "This is a `research` task. Your goal is to investigate the\n\
           \question in the task body and produce a written synthesis in\n\
@@ -103,7 +103,7 @@ kindSpec = \case
     KindSpec
       { ksTools = ["Bash(pot agent *)", "Read", "WebSearch", "WebFetch", "Task", "Write"]
       , ksDefaultMode = Delegate
-      , ksDefaultPermission = PMDefault
+      , ksDefaultPermission = PMBypassPermissions
       , ksPromptAddendum =
           "This is a `design` task. Your goal is to produce a design\n\
           \document or architectural plan.\n\
@@ -119,7 +119,7 @@ kindSpec = \case
     KindSpec
       { ksTools = ["Bash(pot agent *)", "Read", "Grep", "Glob"]
       , ksDefaultMode = Ask
-      , ksDefaultPermission = PMDefault
+      , ksDefaultPermission = PMBypassPermissions
       , ksPromptAddendum =
           "This is a `review` task. You may read files and grep but MUST\n\
           \NOT modify anything in the repository.\n\
@@ -131,7 +131,7 @@ kindSpec = \case
     KindSpec
       { ksTools = ["Bash(pot agent *)", "Read"]
       , ksDefaultMode = Ask
-      , ksDefaultPermission = PMDefault
+      , ksDefaultPermission = PMBypassPermissions
       , ksPromptAddendum =
           "This is a `general` task. The task body describes what the\n\
           \user wants. You have minimal tools by default; use\n\
