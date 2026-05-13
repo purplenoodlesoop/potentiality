@@ -34,6 +34,7 @@ import Potentiality.Meta
   , mutateMeta
   , readMetaOrEmpty
   )
+import Potentiality.Preferences (readPreferencesList, writePreferencesList)
 import Potentiality.Task
   ( Frontmatter (..)
   , Mode
@@ -64,6 +65,8 @@ import Potentiality.Vault
   , cancelFile
   , findingsFile
   , planFile
+  , planNotifiedFile
+  , preferencesFile
   , questionFile
   , questionsDir
   , transcriptFile
@@ -94,6 +97,25 @@ data DoCommand
   | DoTail DoTailOpts
   | DoRun DoRunOpts
   | DoWatch DoWatchOpts
+  | DoRetry DoRetryOpts
+  | DoDrop IdAndVault
+  | DoPref DoPrefOpts
+
+data DoPrefOpts = DoPrefOpts
+  { dpVault :: Maybe FilePath
+  , dpVerb :: DoPrefVerb
+  }
+
+data DoPrefVerb
+  = PrefSet Text
+  | PrefList
+  | PrefClear Int
+
+data DoRetryOpts = DoRetryOpts
+  { dretId :: Text
+  , dretModel :: Maybe Text
+  , dretVault :: Maybe FilePath
+  }
 
 data AgentCommand
   = AgentAsk AgentAskOpts
@@ -111,6 +133,7 @@ data DoNewOpts = DoNewOpts
   , dnRepo :: Maybe FilePath
   , dnStatus :: Text
   , dnPriority :: Maybe Text
+  , dnModel :: Maybe Text
   , dnVault :: Maybe FilePath
   , dnBinds :: [Text]
   , dnBody :: Maybe Text
@@ -217,6 +240,9 @@ doParser =
         <> command "tail" (info (DoTail <$> doTailOpts) (progDesc "Show the tail of a task's transcript"))
         <> command "run" (info (DoRun <$> doRunOpts) (progDesc "Run a task to completion (spawns claude)"))
         <> command "watch" (info (DoWatch <$> doWatchOpts) (progDesc "Watch the vault and run ready tasks"))
+        <> command "retry" (info (DoRetry <$> doRetryOpts) (progDesc "Clear blocked status and re-queue for the daemon"))
+        <> command "drop" (info (DoDrop <$> idAndVault) (progDesc "Mark a task abandoned (status: dropped)"))
+        <> command "pref" (info (DoPref <$> doPrefOpts) (progDesc "Manage persistent agent preferences"))
     )
 
 agentParser :: Parser AgentCommand
@@ -267,9 +293,27 @@ doNewOpts =
     <*> optional (strOption (long "repo" <> metavar "PATH" <> help "Working directory for the spawn"))
     <*> strOption (long "status" <> metavar "STATUS" <> value "inbox" <> showDefault <> help "Starting status; pass ready to skip triage")
     <*> optional (strOption (long "priority" <> metavar "P" <> help "low | med | high"))
+    <*> optional (strOption (long "model" <> metavar "MODEL" <> help "Claude model to use (e.g. claude-opus-4-7)"))
     <*> vaultOption
     <*> many (strOption (long "bind" <> metavar "KEY=VAL" <> help "Set meta.yaml field. KEY is a dotted path (e.g. telegram.chat_id). VAL is JSON-coerced (numbers, bools, null) or treated as string. Repeatable."))
     <*> optional (strArgument (metavar "BODY" <> help "Task body (Markdown). Quote it."))
+
+doRetryOpts :: Parser DoRetryOpts
+doRetryOpts =
+  DoRetryOpts
+    <$> strArgument (metavar "ID")
+    <*> optional (strOption (long "model" <> metavar "MODEL" <> help "Override claude model for the retry"))
+    <*> vaultOption
+
+doPrefOpts :: Parser DoPrefOpts
+doPrefOpts =
+  DoPrefOpts
+    <$> vaultOption
+    <*> hsubparser
+      ( command "set" (info (PrefSet <$> strArgument (metavar "RULE" <> help "Preference rule text")) (progDesc "Append a preference rule"))
+          <> command "list" (info (pure PrefList) (progDesc "List all preference rules"))
+          <> command "clear" (info (PrefClear <$> argument auto (metavar "N" <> help "1-based index to remove")) (progDesc "Remove preference rule by index"))
+      )
 
 doListOpts :: Parser DoListOpts
 doListOpts =
@@ -374,6 +418,9 @@ run = do
     CmdDo (DoTail o) -> doTail o
     CmdDo (DoRun o) -> doRun o
     CmdDo (DoWatch o) -> doWatch o
+    CmdDo (DoRetry o) -> doRetry o
+    CmdDo (DoDrop iv) -> doDrop iv
+    CmdDo (DoPref po) -> doPref po
     CmdAgent (AgentAsk o) -> agentAsk o
     CmdAgent (AgentStatus t) -> agentStatus t
     CmdAgent (AgentNote t) -> agentNote t
@@ -398,7 +445,8 @@ doNew o = do
   tid <- TaskId <$> newUlid
   let body = maybe "" id (dnBody o)
       title = maybe (deriveTitleFromBody body) id (dnTitle o)
-      fm = blankFrontmatter now kind status title mode priority (dnRepo o)
+      model = case dnModel o of { Just "" -> Nothing; x -> x }
+      fm = blankFrontmatter now kind status title mode priority (dnRepo o) model
       task = Task {taskId = tid, taskFrontmatter = fm, taskBody = body}
   writeTaskFile vault task
   applyBinds vault tid (dnBinds o)
@@ -412,8 +460,9 @@ blankFrontmatter
   -> Maybe Mode
   -> Maybe Priority
   -> Maybe FilePath
+  -> Maybe Text
   -> Frontmatter
-blankFrontmatter now kind status title mode priority repo =
+blankFrontmatter now kind status title mode priority repo model =
   Frontmatter
     { fmSchema = schemaVersion
     , fmKind = kind
@@ -431,6 +480,8 @@ blankFrontmatter now kind status title mode priority repo =
     , fmPlanApproval = PARequired
     , fmTelegram = Nothing
     , fmLabels = []
+    , fmModel = model
+    , fmRetryCount = 0
     }
 
 doList :: DoListOpts -> IO ()
@@ -445,7 +496,10 @@ doList o = do
   let tasks =
         [ t
         | (_, Just (Right t)) <- parsed
-        , null statusFilters || fmStatus (taskFrontmatter t) `elem` statusFilters
+        , -- Dropped tasks are hidden from the default listing.
+          -- Show them only when --status dropped is explicitly requested.
+          (null statusFilters && fmStatus (taskFrontmatter t) /= Dropped)
+            || fmStatus (taskFrontmatter t) `elem` statusFilters
         , null kindFilters || fmKind (taskFrontmatter t) `elem` kindFilters
         ]
       errors = [tid | (tid, Just (Left _)) <- parsed]
@@ -593,6 +647,68 @@ doWatch o = do
   vault <- resolveVault (dwVault o)
   watchVault vault (dwMaxConcurrent o)
 
+doRetry :: DoRetryOpts -> IO ()
+doRetry o = do
+  vault <- resolveVault (dretVault o)
+  let tid = TaskId (dretId o)
+      newModel = case dretModel o of { Just "" -> Nothing; x -> x }
+  task <- readTask vault tid
+  let fm = taskFrontmatter task
+  case fmStatus fm of
+    Blocked -> pure ()
+    other -> die ("retry: task is " <> T.unpack (statusText other) <> ", not blocked")
+  mutateFrontmatter vault tid $ \f ->
+    f
+      { fmStatus = Ready
+      , fmRetryCount = fmRetryCount f + 1
+      , fmModel = maybe (fmModel f) Just newModel
+      }
+  -- Clear session-specific meta so the new run starts fresh, but keep
+  -- the telegram binding so notifications still route to the right chat.
+  mutateMeta vault tid $ \m ->
+    m
+      { metaClaudeSessionId = Nothing
+      , metaStartedAt = Nothing
+      , metaFinishedAt = Nothing
+      , metaCurrentStep = Nothing
+      , metaLastToolCall = Nothing
+      , metaTotalCostUsd = Nothing
+      , metaTokens = Nothing
+      , metaPlanDecision = Nothing
+      , metaPlanRevision = Nothing
+      , metaPlanDecidedAt = Nothing
+      }
+  TIO.putStrLn ("retry: " <> unTaskId tid)
+
+doDrop :: IdAndVault -> IO ()
+doDrop iv = do
+  vault <- resolveVault (ivVault iv)
+  let tid = TaskId (ivId iv)
+  mutateFrontmatter vault tid (\fm -> fm {fmStatus = Dropped})
+  TIO.putStrLn ("dropped: " <> unTaskId tid)
+
+doPref :: DoPrefOpts -> IO ()
+doPref po = do
+  vault <- resolveVault (dpVault po)
+  let fp = preferencesFile vault
+  case dpVerb po of
+    PrefSet rule -> do
+      prefs <- readPreferencesList fp
+      writePreferencesList fp (prefs <> [rule])
+      TIO.putStrLn ("pref set: " <> rule)
+    PrefList -> do
+      prefs <- readPreferencesList fp
+      if null prefs
+        then TIO.putStrLn "(no preferences set)"
+        else mapM_ (\(i, p) -> TIO.putStrLn (T.pack (show (i :: Int)) <> ". " <> p)) (zip [1 ..] prefs)
+    PrefClear n -> do
+      prefs <- readPreferencesList fp
+      when (n < 1 || n > length prefs) $
+        die ("pref clear: index " <> show n <> " out of range (1-" <> show (length prefs) <> ")")
+      let updated = take (n - 1) prefs <> drop n prefs
+      writePreferencesList fp updated
+      TIO.putStrLn ("pref cleared: #" <> T.pack (show n))
+
 parseAbsFile' :: FilePath -> IO (Path Abs File)
 parseAbsFile' fp =
   case (parseAbsFile fp :: Maybe (Path Abs File)) of
@@ -693,6 +809,10 @@ agentPlan txt = do
       , metaPlanRevision = Nothing
       , metaPlanDecidedAt = Nothing
       }
+  -- Write plan.notified AFTER plan.md so Horizon's watcher triggers on a
+  -- stable, fully-written plan file rather than the intermediate write.
+  nfp <- planNotifiedFile vault tid
+  atomicWriteBinaryFile nfp ""
   cancelFp <- cancelFile vault tid
   res <- waitForCondition (checkPlanDecision vault tid) [cancelFp] Nothing
   case res of
@@ -790,6 +910,3 @@ die msg = do
   hPutStrLn stderr msg
   exitFailure
 
--- Suppress unused-warning for symbols re-exported but not yet used.
-_when :: Bool -> IO () -> IO ()
-_when = when

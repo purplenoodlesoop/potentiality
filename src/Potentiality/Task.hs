@@ -87,6 +87,8 @@ data Frontmatter = Frontmatter
   , fmPlanApproval :: PlanApproval
   , fmTelegram :: Maybe TelegramBinding
   , fmLabels :: [Text]
+  , fmModel :: Maybe Text
+  , fmRetryCount :: Int
   }
   deriving stock (Show)
 
@@ -110,7 +112,7 @@ parseKind = \case
   "general" -> Right General
   other -> Left $ "unknown task kind: " <> T.unpack other
 
-data Status = Inbox | Ready | InProgress | Done | Blocked
+data Status = Inbox | Ready | InProgress | Done | Blocked | Dropped
   deriving stock (Eq, Show)
 
 statusText :: Status -> Text
@@ -120,6 +122,7 @@ statusText = \case
   InProgress -> "in_progress"
   Done -> "done"
   Blocked -> "blocked"
+  Dropped -> "dropped"
 
 parseStatus :: Text -> Either String Status
 parseStatus = \case
@@ -128,6 +131,7 @@ parseStatus = \case
   "in_progress" -> Right InProgress
   "done" -> Right Done
   "blocked" -> Right Blocked
+  "dropped" -> Right Dropped
   other -> Left $ "unknown status: " <> T.unpack other
 
 data Mode = Ask | Delegate
@@ -288,6 +292,8 @@ instance FromJSON Frontmatter where
       <*> o .:? "plan_approval" .!= PARequired
       <*> o .:? "telegram"
       <*> o .:? "labels" .!= []
+      <*> o .:? "model"
+      <*> o .:? "retry_count" .!= 0
 
 instance ToJSON Frontmatter where
   toJSON fm =
@@ -301,6 +307,7 @@ instance ToJSON Frontmatter where
       , "plan_approval" .= fmPlanApproval fm
       , "depends_on" .= fmDependsOn fm
       , "labels" .= fmLabels fm
+      , "retry_count" .= fmRetryCount fm
       ]
         <> optKV "mode" (fmMode fm)
         <> optKV "repo" (fmRepo fm)
@@ -309,6 +316,7 @@ instance ToJSON Frontmatter where
         <> optKV "permission_mode" (fmPermissionMode fm)
         <> optKV "allowed_tools" (fmAllowedTools fm)
         <> optKV "telegram" (fmTelegram fm)
+        <> optKV "model" (fmModel fm)
 
 -- | Emit a YAML key only when the value is 'Just'. Keeps optional fields out
 -- of the round-tripped file when unset.

@@ -14,12 +14,14 @@ module Potentiality.Vault
   , transcriptFile
   , transcriptJsonlFile
   , planFile
+  , planNotifiedFile
   , findingsFile
   , questionsDir
   , questionFile
   , answerFile
   , inboxDir
   , cancelFile
+  , preferencesFile
   , parseTaskId
   ) where
 
@@ -60,6 +62,12 @@ transcriptJsonlFile v tid = (</> [relfile|transcript.jsonl|]) <$> taskDir v tid
 planFile :: MonadThrow m => Vault -> TaskId -> m (Path Abs File)
 planFile v tid = (</> [relfile|plan.md|]) <$> taskDir v tid
 
+-- | Sentinel written by @pot agent plan@ after plan.md is ready. Horizon
+-- watches this file (not plan.md) to avoid spurious triggers before the
+-- plan body is fully written.
+planNotifiedFile :: MonadThrow m => Vault -> TaskId -> m (Path Abs File)
+planNotifiedFile v tid = (</> [relfile|plan.notified|]) <$> taskDir v tid
+
 findingsFile :: MonadThrow m => Vault -> TaskId -> m (Path Abs File)
 findingsFile v tid = (</> [relfile|findings.md|]) <$> taskDir v tid
 
@@ -91,6 +99,11 @@ zeroPad :: Int -> Int -> FilePath
 zeroPad width n = replicate (max 0 (width - length s)) '0' <> s
   where
     s = show n
+
+-- | Persistent user-preference rules injected into every spawned agent's
+-- system prompt. Lives at the vault root so it survives across tasks.
+preferencesFile :: Vault -> Path Abs File
+preferencesFile (Vault root) = root </> [relfile|preferences.md|]
 
 -- | Lift a directory name into a 'TaskId'. No validation; ULID structure is
 -- a convention, not a guarantee. Listing 'tasksDir' and lifting each entry
