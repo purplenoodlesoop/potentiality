@@ -64,6 +64,8 @@ import Potentiality.Vault
   , cancelFile
   , findingsFile
   , planFile
+  , planNotifiedFile
+  , preferencesFile
   , questionFile
   , questionsDir
   , transcriptFile
@@ -693,6 +695,10 @@ agentPlan txt = do
       , metaPlanRevision = Nothing
       , metaPlanDecidedAt = Nothing
       }
+  -- Write plan.notified AFTER plan.md so Horizon's watcher triggers on a
+  -- stable, fully-written plan file rather than the intermediate write.
+  nfp <- planNotifiedFile vault tid
+  atomicWriteBinaryFile nfp ""
   cancelFp <- cancelFile vault tid
   res <- waitForCondition (checkPlanDecision vault tid) [cancelFp] Nothing
   case res of
