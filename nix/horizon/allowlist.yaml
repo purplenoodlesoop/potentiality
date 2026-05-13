@@ -1,0 +1,98 @@
+# Allowlist fragment shipped by the Potentiality NixOS module. Loaded by
+# Horizon via `--extra-allowlist`. Names must not collide with the vault's
+# main allowlist.yaml — Horizon errors on conflict at startup.
+#
+# Conventions matching the Horizon allowlist format:
+#   - `{vault_path}` substitutes the absolute vault root.
+#   - Param values are shell-quoted by the harness before substitution.
+#   - `path` type stays under the vault.
+#   - `telegram_chat_id` type is validated against `_horizon/messages/`.
+tools:
+  - name: task_new
+    description: "Create a new Potentiality task. Use when the user asks for autonomous coding, research, design, or review work that should run outside the orchestrator's context. Returns the new ULID on stdout. The chat_id is bound to the task so subsequent questions, plan decisions, and status updates reach the same Telegram chat."
+    parameters:
+      kind:
+        type: string
+        description: "One of: code, research, design, review, general."
+      title:
+        type: string
+        description: One-line task title (used in listings).
+      body:
+        type: string
+        description: The full task prompt. Pasted verbatim into the spawned agent's user message.
+      chat_id:
+        type: telegram_chat_id
+        description: Telegram chat to bind for later question/plan/status delivery.
+    command: "pot do new --vault {vault_path} --kind {kind} --title {title} --status ready --bind telegram.chat_id={chat_id} -- {body}"
+
+  - name: task_list
+    description: List all Potentiality tasks as JSON. Filter in the orchestrator (status, kind, etc.). Use to answer "what tasks do I have", "what's pot working on right now", etc.
+    command: "pot do list --vault {vault_path} --format json"
+
+  - name: task_show
+    description: Show one Potentiality task's frontmatter, status, recent transcript, and any pending questions. Use to inspect a specific task by ULID, e.g. after the user asks "what's task X doing".
+    parameters:
+      id:
+        type: string
+        description: Task ULID (26 alphanumeric chars).
+    command: "pot do show --vault {vault_path} {id} --format json"
+
+  - name: task_tail
+    description: Tail the last N lines of a task's transcript.md. Use when the user asks "show me what task X has been doing" or to debug a stuck task.
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+      n:
+        type: string
+        description: Number of trailing lines to return.
+    command: "pot do tail --vault {vault_path} {id} --tail {n}"
+
+  - name: task_kill
+    description: Cancel a running task. Writes the CANCEL signal; the daemon sends SIGTERM, then SIGKILL after 5s. Use when the user says "stop", "cancel that task", or when a task is clearly off the rails.
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+    command: "pot do kill --vault {vault_path} {id}"
+
+  - name: task_answer
+    description: "Answer a pending question that a task is blocked on. Use after the user replies in Telegram to a question this capability posted earlier. The answer text is passed verbatim to the waiting agent (which is suspended on `pot agent ask`)."
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+      num:
+        type: string
+        description: "Question number (zero-padded 3-digit string matching questions/NNN.md, e.g. \"001\")."
+      answer:
+        type: string
+        description: User's reply text. Passed verbatim to the agent.
+    command: "pot do answer --vault {vault_path} {id} {num} -- {answer}"
+
+  - name: task_approve
+    description: "Approve a plan a task is awaiting decision on (mode: delegate tasks block on `pot agent plan` until the user decides). Use when the user replies with affirmative intent to a plan this capability posted."
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+    command: "pot do approve --vault {vault_path} {id}"
+
+  - name: task_revise
+    description: Reject a plan and ask the agent to revise it with feedback. Use when the user's reply indicates the plan needs change but the task should continue.
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+      feedback:
+        type: string
+        description: What to change in the plan. Passed back to the agent as plan-revision instructions.
+    command: "pot do approve --vault {vault_path} {id} --revise {feedback}"
+
+  - name: task_reject
+    description: Reject a plan and abandon the task. Use when the user's reply clearly rejects the work entirely.
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+    command: "pot do approve --vault {vault_path} {id} --reject"
