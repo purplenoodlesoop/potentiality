@@ -36,6 +36,7 @@
       topLevel = {
         nixosModules.potentiality = ./nix/module.nix;
         nixosModules.default = ./nix/module.nix;
+        nixosModules.horizonIntegration = ./nix/horizon-integration.nix;
       };
     };
 }
