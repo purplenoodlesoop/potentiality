@@ -112,9 +112,9 @@ data DoPrefVerb
   | PrefClear Int
 
 data DoRetryOpts = DoRetryOpts
-  { drId :: Text
-  , drModel :: Maybe Text
-  , drVault :: Maybe FilePath
+  { dretId :: Text
+  , dretModel :: Maybe Text
+  , dretVault :: Maybe FilePath
   }
 
 data AgentCommand
@@ -649,9 +649,9 @@ doWatch o = do
 
 doRetry :: DoRetryOpts -> IO ()
 doRetry o = do
-  vault <- resolveVault (drVault o)
-  let tid = TaskId (drId o)
-      newModel = case drModel o of { Just "" -> Nothing; x -> x }
+  vault <- resolveVault (dretVault o)
+  let tid = TaskId (dretId o)
+      newModel = case dretModel o of { Just "" -> Nothing; x -> x }
   task <- readTask vault tid
   let fm = taskFrontmatter task
   case fmStatus fm of
