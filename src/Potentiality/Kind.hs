@@ -58,7 +58,11 @@ basePromptPreamble =
   \  - Never call `pot agent finding` for `kind: code`. Use Edit/Write to\n\
   \    modify the repo instead.\n\
   \  - Never speculate about Telegram, channels, users by name, or\n\
-  \    message formatting; `pot agent ask` returns a plain string answer.\n"
+  \    message formatting; `pot agent ask` returns a plain string answer.\n\
+  \  - When you use `pot agent ask`, call it SYNCHRONOUSLY. Do NOT pass\n\
+  \    `run_in_background: true` and do NOT call ScheduleWakeup. The tool\n\
+  \    blocks until the human answers — just wait for it to return.\n\
+  \  - Never use `run_in_background: true` for any `pot agent *` command.\n"
 
 kindSpec :: TaskKind -> KindSpec
 kindSpec = \case

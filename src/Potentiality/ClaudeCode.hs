@@ -23,6 +23,7 @@ import Path (Abs, File, Path, toFilePath)
 import Path.IO (doesFileExist, ensureDir)
 import Potentiality.Kind (KindSpec (..), basePromptPreamble, kindSpec)
 import Potentiality.Meta (Meta (..), Tokens (..), mutateMeta)
+import Potentiality.Preferences (loadPreferences, prefsToSystemPrompt)
 import Potentiality.StreamJson
   ( Event (..)
   , InitInfo (..)
@@ -51,6 +52,9 @@ runClaude vault task = do
       mode = maybe (ksDefaultMode ks) id (fmMode fm)
       permMode = maybe (ksDefaultPermission ks) id (fmPermissionMode fm)
       tools = maybe (ksTools ks) id (fmAllowedTools fm)
+
+  prefs <- loadPreferences vault
+  let prefSection = prefsToSystemPrompt prefs
       systemAppend =
         basePromptPreamble
           <> "\n"
@@ -58,6 +62,7 @@ runClaude vault task = do
           <> "\nMode: "
           <> modeTextOf mode
           <> "\n"
+          <> prefSection
 
   td <- taskDir vault tid
   let workdir = maybe (toFilePath td) id (fmRepo fm)
@@ -74,19 +79,26 @@ runClaude vault task = do
         ]
       envFinal = envExtras <> filter (\(k, _) -> k `notElem` map fst envExtras) envBase
 
+      modelArgs = case fmModel fm of
+        Nothing -> []
+        Just m -> ["--model", T.unpack m]
+
       -- NOTE: deliberately no `--bare`; see spec/06 / LIMITATIONS.md.
       args =
-        [ "-p"
-        , "--output-format"
-        , "stream-json"
-        , "--include-partial-messages"
-        , "--append-system-prompt"
-        , T.unpack systemAppend
-        , "--allowedTools"
-        , T.unpack (T.intercalate "," tools)
-        , "--permission-mode"
-        , T.unpack (permissionModeText permMode)
-        ]
+        modelArgs
+          <> [ "-p"
+             , "--output-format"
+             , "stream-json"
+             , "--include-partial-messages"
+             , "--append-system-prompt"
+             , T.unpack systemAppend
+             , "--allowedTools"
+             , T.unpack (T.intercalate "," tools)
+             , "--permission-mode"
+             , T.unpack (permissionModeText permMode)
+             , "--disallowedTools"
+             , "ScheduleWakeup"
+             ]
           <> budgetArgs (fmBudgetUsd fm)
           <> ["--", T.unpack (taskBody task)]
 
