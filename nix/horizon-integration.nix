@@ -13,6 +13,19 @@ in
       pot-tasks capability into Horizon's vault.
     '';
 
+    package = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = config.services.potentiality.package or null;
+      defaultText = lib.literalExpression "config.services.potentiality.package";
+      description = ''
+        The Pot package to make available on Horizon's PATH. Defaults
+        to `services.potentiality.package` so the daemon and the
+        chat-side bash tools resolve to the same binary. Required —
+        the integration is non-functional without `pot` reachable
+        from Horizon's service.
+      '';
+    };
+
     installCapability = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -64,12 +77,27 @@ in
           services.horizon.enable = true; first.
         '';
       }
+      {
+        assertion = cfg.package != null;
+        message = ''
+          services.potentiality.horizon.package must be set so the
+          `pot` binary is on Horizon's service PATH. Set it
+          explicitly, or enable services.potentiality so its
+          .package option provides a default.
+        '';
+      }
     ];
 
     # Ship the task_* tool surface to Horizon. The fragment is
     # store-resident so it survives vault edits, and is hot-reloaded
     # by Horizon per event like any other allowlist.
     services.horizon.extraAllowlists = [ allowlistFragment ];
+
+    # Make `pot` reachable from Horizon's bash subprocesses so the
+    # task_* tools can shell out. NixOS service paths default to a
+    # set of standard utilities only — `pot` is in the system
+    # profile but not the service's PATH unless we add it here.
+    services.horizon.extraPath = [ cfg.package ];
 
     # Drop the pot-tasks capability into the vault as a symlink to
     # the store. Type `L` means "create only if missing", so user
