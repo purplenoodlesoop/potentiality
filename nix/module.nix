@@ -34,27 +34,6 @@ in
       description = "Maximum concurrent tasks the watcher will claim.";
     };
 
-    maxCostUsdPerTask = lib.mkOption {
-      type = lib.types.nullOr lib.types.number;
-      default = null;
-      example = 5;
-      description = "Per-task budget cap forwarded to `claude`. Null disables.";
-    };
-
-    maxCostUsdPerDay = lib.mkOption {
-      type = lib.types.nullOr lib.types.number;
-      default = null;
-      example = 25;
-      description = ''
-        Daily aggregate cost cap. Null disables.
-
-        NOTE: as of v0.1.0 the binary accepts this flag but does not
-        enforce it (see `LIMITATIONS.md`). Setting it here is a no-op
-        until enforcement lands; the option exists so configs don't
-        need to change later.
-      '';
-    };
-
     extraPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
@@ -80,14 +59,11 @@ in
     extraArgs = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      example = [ "--raw-transcripts" ];
-      description = "Extra flags passed to `pot do watch`.";
-    };
-
-    logLevel = lib.mkOption {
-      type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
-      default = "info";
-      description = "Log level passed via `--log-level`.";
+      description = ''
+        Extra flags passed to `pot do watch`. Only the flags actually
+        implemented by the binary work here — `--vault` and
+        `--max-concurrent` are already set by the module.
+      '';
     };
   };
 
@@ -121,16 +97,9 @@ in
         ExecStart = lib.concatStringsSep " " (
           [
             (lib.getExe cfg.package)
-            "--log-level" cfg.logLevel
             "do" "watch"
-            (lib.escapeShellArg cfg.vault)
+            "--vault" (lib.escapeShellArg cfg.vault)
             "--max-concurrent" (toString cfg.maxConcurrent)
-          ]
-          ++ lib.optionals (cfg.maxCostUsdPerTask != null) [
-            "--max-cost-usd-per-task" (toString cfg.maxCostUsdPerTask)
-          ]
-          ++ lib.optionals (cfg.maxCostUsdPerDay != null) [
-            "--max-cost-usd-per-day" (toString cfg.maxCostUsdPerDay)
           ]
           ++ map lib.escapeShellArg cfg.extraArgs
         );
