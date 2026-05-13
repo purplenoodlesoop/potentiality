@@ -47,6 +47,7 @@ library
     Potentiality.CLI
     Potentiality.Kind
     Potentiality.Meta
+    Potentiality.Preferences
     Potentiality.StreamJson
     Potentiality.Task
     Potentiality.Task.Parse

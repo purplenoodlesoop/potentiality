@@ -23,7 +23,11 @@ tools:
       chat_id:
         type: telegram_chat_id
         description: Telegram chat to bind for later question/plan/status delivery.
-    command: "pot do new --vault {vault_path} --kind {kind} --title {title} --status ready --bind telegram.chat_id={chat_id} -- {body}"
+      model:
+        type: string
+        optional: true
+        description: "Claude model to use for this task (e.g. claude-opus-4-7, claude-sonnet-4-6). Pass empty string or omit to use the daemon default."
+    command: "pot do new --vault {vault_path} --kind {kind} --title {title} --status ready --bind telegram.chat_id={chat_id} --model {model} -- {body}"
 
   - name: task_list
     description: List all Potentiality tasks as JSON. Filter in the orchestrator (status, kind, etc.). Use to answer "what tasks do I have", "what's pot working on right now", etc.
@@ -96,3 +100,43 @@ tools:
         type: string
         description: Task ULID.
     command: "pot do approve --vault {vault_path} {id} --reject"
+
+  - name: task_retry
+    description: "Clear a task's blocked status and re-queue it for the daemon. Use when the user says 'try again', 'retry', or when a blocked task should be retried, optionally with a different model."
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+      model:
+        type: string
+        optional: true
+        description: "Override the Claude model for the retry (e.g. claude-opus-4-7). Pass empty string to keep the current model."
+    command: "pot do retry --vault {vault_path} --model {model} {id}"
+
+  - name: task_drop
+    description: "Mark a task as abandoned (status: dropped). Dropped tasks are hidden from the default listing. Use when the user cancels or abandons a task that is blocked or otherwise not progressing."
+    parameters:
+      id:
+        type: string
+        description: Task ULID.
+    command: "pot do drop --vault {vault_path} {id}"
+
+  - name: task_pref_set
+    description: "Append a persistent user preference rule. The rule is injected into every spawned agent's system prompt so behavioural conventions (e.g. 'install tools via home-manager, never nix profile install') apply across all future tasks."
+    parameters:
+      rule:
+        type: string
+        description: The preference rule text (one concise sentence).
+    command: "pot do pref set --vault {vault_path} -- {rule}"
+
+  - name: task_pref_list
+    description: "List all currently stored user preference rules with their 1-based indices."
+    command: "pot do pref list --vault {vault_path}"
+
+  - name: task_pref_clear
+    description: "Remove a user preference rule by its 1-based index (as shown by task_pref_list)."
+    parameters:
+      index:
+        type: string
+        description: "1-based index of the rule to remove."
+    command: "pot do pref clear --vault {vault_path} {index}"

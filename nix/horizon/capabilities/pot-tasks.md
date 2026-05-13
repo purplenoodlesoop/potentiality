@@ -3,7 +3,7 @@ id: pot-tasks
 description: "Load when the user wants to file or check on long-running autonomous agent work (coding, research, design, review) handled by the Potentiality runner. Also loads on vault-watcher events under tasks/* — new questions awaiting an answer, new plans awaiting a decision, or status transitions to done/blocked."
 watch:
   - "tasks/*/questions/[0-9][0-9][0-9].md"
-  - "tasks/*/plan.md"
+  - "tasks/*/plan.notified"
   - "tasks/*/task.md"
 schedule: 1m
 ---
@@ -54,12 +54,23 @@ current state:
 4. Post the question body via `send_telegram(chat_id, text)`. If `options` is set, list them as numbered choices in the message (Telegram inline keyboards aren't reachable from the bash allowlist; numbered choices the user can reply to are the next best thing).
 5. Write an empty marker via `write_file` at `tasks/<id>/questions/<NNN>.notified`.
 
-### `tasks/<id>/plan.md`
+### `tasks/<id>/plan.notified`
 
-1. Read `tasks/<id>/meta.yaml#plan_decision`. If it's `approved`, `revise`, or `rejected`, the agent has moved on — skip.
-2. If `tasks/<id>/plan.notified` exists AND the plan file's mtime is older than the marker, skip. Otherwise (plan was rewritten after a revise) re-post.
-3. Read `plan.md`. Post via `send_telegram` with explicit response cues: "Reply with **approve** / **reject** / a revision instruction."
-4. Write `tasks/<id>/plan.notified`.
+This file is written by `pot agent plan` only after `plan.md` is fully written,
+making it the single reliable trigger for plan notifications.
+
+1. Read `tasks/<id>/meta.yaml#plan_decision`. If it is `approved`, `revise`, or
+   `rejected`, the agent has already acted on this plan — skip.
+2. Read the **exact raw text** of `tasks/<id>/plan.md` using `read_file`.
+   **Do NOT compose, draft, paraphrase, or summarize the plan content yourself.**
+   The entire Telegram message body is the verbatim file contents — nothing more,
+   nothing less.
+3. Post via `send_telegram` with the verbatim plan body, followed by a single
+   line break and the cue: "Reply with **approve** / **reject** / a revision
+   instruction."
+4. The `plan.notified` file itself is the trigger; no separate idempotency
+   marker is needed. The `meta.yaml#plan_decision` state (checked in step 1)
+   prevents re-posting for the same plan submission.
 
 ### `tasks/<id>/task.md`
 
