@@ -61,9 +61,9 @@ Transitively through `subversion` → `apr-util` → `dbm/sdbm/sdbm_pair.c` whic
 
 Whenever you add/remove a Haskell dep, edit both `potentiality.cabal` *and* `nix/pot.nix` in the same commit.
 
-### NixOS module not generated
+### NixOS module — daily-cost cap is a no-op
 
-Spec sketches a systemd-user-service `nixosModule.potentiality`. The flake doesn't export it yet. Easy follow-up; the spec text in `spec/09-provisioning.md` is the design.
+`flake.nix` exports `nixosModules.{default,potentiality}` (a systemd-user-service that runs `pot do watch`). The `services.potentiality.maxCostUsdPerDay` option is plumbed through to the `--max-cost-usd-per-day` flag, but the binary itself does not yet enforce it (see "No `--max-cost-usd-per-day` enforcement" above). Setting it in the module is a no-op until enforcement lands.
 
 ## Quality
 

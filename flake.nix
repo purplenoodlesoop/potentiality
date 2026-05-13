@@ -33,5 +33,9 @@
             ];
           };
         };
+      topLevel = {
+        nixosModules.potentiality = ./nix/module.nix;
+        nixosModules.default = ./nix/module.nix;
+      };
     };
 }
