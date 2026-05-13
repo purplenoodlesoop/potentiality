@@ -68,6 +68,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    environment.systemPackages = [ cfg.package ];
+
     assertions = [
       {
         assertion = cfg.package != null;
