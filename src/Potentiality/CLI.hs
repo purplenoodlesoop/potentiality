@@ -30,6 +30,7 @@ import Potentiality.ClaudeCode (runClaude)
 import Potentiality.Meta
   ( Meta (..)
   , PlanDecision (..)
+  , applyBinds
   , mutateMeta
   , readMetaOrEmpty
   )
@@ -111,6 +112,7 @@ data DoNewOpts = DoNewOpts
   , dnStatus :: Text
   , dnPriority :: Maybe Text
   , dnVault :: Maybe FilePath
+  , dnBinds :: [Text]
   , dnBody :: Maybe Text
   }
 
@@ -266,6 +268,7 @@ doNewOpts =
     <*> strOption (long "status" <> metavar "STATUS" <> value "inbox" <> showDefault <> help "Starting status; pass ready to skip triage")
     <*> optional (strOption (long "priority" <> metavar "P" <> help "low | med | high"))
     <*> vaultOption
+    <*> many (strOption (long "bind" <> metavar "KEY=VAL" <> help "Set meta.yaml field. KEY is a dotted path (e.g. telegram.chat_id). VAL is JSON-coerced (numbers, bools, null) or treated as string. Repeatable."))
     <*> optional (strArgument (metavar "BODY" <> help "Task body (Markdown). Quote it."))
 
 doListOpts :: Parser DoListOpts
@@ -398,6 +401,7 @@ doNew o = do
       fm = blankFrontmatter now kind status title mode priority (dnRepo o)
       task = Task {taskId = tid, taskFrontmatter = fm, taskBody = body}
   writeTaskFile vault task
+  applyBinds vault tid (dnBinds o)
   TIO.putStrLn (unTaskId tid)
 
 blankFrontmatter

@@ -13,12 +13,16 @@ module Potentiality.Meta
   , readMetaOrEmpty
   , writeMeta
   , mutateMeta
+  , applyBinds
   ) where
 
 import Data.Aeson
   ( FromJSON (..)
+  , Result (..)
   , ToJSON (..)
   , Value (..)
+  , decodeStrict
+  , fromJSON
   , object
   , withObject
   , withText
@@ -28,10 +32,14 @@ import Data.Aeson
   , (.=)
   )
 import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types (Pair)
 import Data.ByteString qualified as BS
+import Data.List (foldl')
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Data.Time (UTCTime)
 import Data.Yaml qualified as Yaml
 import Path (toFilePath)
@@ -209,3 +217,63 @@ mutateMeta :: Vault -> TaskId -> (Meta -> Meta) -> IO ()
 mutateMeta vault tid f = withTaskLock vault tid $ do
   m <- readMetaOrEmpty vault tid
   writeMeta vault tid (f m)
+
+-- | Apply a list of @KEY=VAL@ bindings to the task's @meta.yaml@.
+--
+-- Each entry has the form @dotted.key.path=value@. The key path
+-- creates nested objects as needed. The value is parsed as JSON
+-- (so numbers, booleans, and null are typed) and falls back to a
+-- string when it isn't valid JSON.
+--
+-- After all bindings are applied, the resulting document is
+-- validated against the 'Meta' schema. If a binding produces an
+-- unparsable @meta.yaml@ (e.g. @plan_decision=banana@) the call
+-- fails and the file is not touched.
+applyBinds :: Vault -> TaskId -> [Text] -> IO ()
+applyBinds _ _ [] = pure ()
+applyBinds vault tid binds = withTaskLock vault tid $ do
+  fp <- metaFile vault tid
+  base <- readRawMeta fp
+  parsed <- traverse parseBindEntry binds
+  let updated = foldl' (\v (k, val) -> setAtPath k val v) base parsed
+  case fromJSON updated :: Result Meta of
+    Error e -> error ("--bind produces invalid meta.yaml: " <> e)
+    Success _ -> atomicWriteBinaryFile fp (Yaml.encode updated)
+  where
+    readRawMeta path = do
+      exists <- doesFileExist path
+      if not exists
+        then pure (Object KeyMap.empty)
+        else do
+          bs <- BS.readFile (toFilePath path)
+          if BS.null bs
+            then pure (Object KeyMap.empty)
+            else case Yaml.decodeEither' bs of
+              Left e -> error ("meta.yaml parse failed: " <> show e)
+              Right v -> pure v
+
+parseBindEntry :: Text -> IO ([Text], Value)
+parseBindEntry raw = case T.breakOn "=" raw of
+  (k, eqV)
+    | T.null eqV -> error ("--bind requires KEY=VAL form: " <> T.unpack raw)
+    | T.null (T.strip k) -> error ("--bind has empty key: " <> T.unpack raw)
+    | otherwise ->
+        let path = T.splitOn "." (T.strip k)
+            valText = T.drop 1 eqV
+         in pure (path, coerceBindValue valText)
+
+setAtPath :: [Text] -> Value -> Value -> Value
+setAtPath [] new _ = new
+setAtPath (k : rest) new current =
+  let obj = case current of
+        Object o -> o
+        _ -> KeyMap.empty
+      inner = fromMaybe (Object KeyMap.empty) (KeyMap.lookup (Key.fromText k) obj)
+      updated = setAtPath rest new inner
+   in Object (KeyMap.insert (Key.fromText k) updated obj)
+
+-- | Coerce a CLI string into a JSON 'Value'. Falls back to 'String'
+-- when the input isn't a valid JSON literal. So @12345@ becomes a
+-- number, @true@/@false@ become bools, and arbitrary text stays text.
+coerceBindValue :: Text -> Value
+coerceBindValue t = fromMaybe (String t) (decodeStrict (TE.encodeUtf8 t))
