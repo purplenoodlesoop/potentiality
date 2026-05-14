@@ -36,6 +36,14 @@ updates will route back there.
 - `tasks/<id>/questions/<NNN>.answer.md` — written by `task_answer`; the agent reads it to unblock.
 - `tasks/<id>/plan.md` — raw markdown (no frontmatter). State lives in `meta.yaml#plan_decision` (`pending`, `approved`, `revise`, `rejected`).
 - `tasks/<id>/findings.md` — written by `kind: research` / `kind: design` tasks. The deliverable for those kinds.
+- `tasks/<id>/deliveries.yaml` — written by **this capability** (not the daemon) to log plan notifications that were actually delivered. Structure:
+  ```yaml
+  plans:
+    - first_line: "<first non-empty line of plan.md at send time>"
+      chat_id: "289392953"
+      sent_at: "2026-05-14T09:43:17Z"
+  ```
+  This is the authoritative record of whether a plan was delivered. The file is written **only after** `send_telegram` returns successfully. A missing or empty file means no plan has been delivered yet.
 - `tasks/<id>/transcript.md` and `transcript.jsonl` — agent transcripts; useful for `task_tail` debugging but not for user replies.
 
 Never edit these directly. Always use the `task_*` tools.
@@ -59,18 +67,46 @@ current state:
 This file is written by `pot agent plan` only after `plan.md` is fully written,
 making it the single reliable trigger for plan notifications.
 
+**Before sending, perform an idempotency check using `deliveries.yaml`:**
+
 1. Read `tasks/<id>/meta.yaml#plan_decision`. If it is `approved`, `revise`, or
-   `rejected`, the agent has already acted on this plan — skip.
-2. Read the **exact raw text** of `tasks/<id>/plan.md` using `read_file`.
-   **Do NOT compose, draft, paraphrase, or summarize the plan content yourself.**
-   The entire Telegram message body is the verbatim file contents — nothing more,
-   nothing less.
-3. Post via `send_telegram` with the verbatim plan body, followed by a single
-   line break and the cue: "Reply with **approve** / **reject** / a revision
-   instruction."
-4. The `plan.notified` file itself is the trigger; no separate idempotency
-   marker is needed. The `meta.yaml#plan_decision` state (checked in step 1)
-   prevents re-posting for the same plan submission.
+   `rejected`, the agent has already acted on this plan — stop, do nothing.
+
+2. Read `tasks/<id>/plan.md` verbatim with `read_file`. Extract the first
+   non-empty line (the plan's identity key).
+
+3. Read `tasks/<id>/deliveries.yaml` with `read_file`.
+   - If the file exists and contains a `plans:` list, check whether any entry's
+     `first_line` matches the first non-empty line you extracted in step 2.
+   - **Match found → plan already delivered → stop, do nothing.**
+   - No match (or file absent/empty) → proceed to send.
+
+   **Do NOT use `plan.notified` itself as an idempotency check.** Its content
+   is unreliable: it may be pre-written before a successful send, truncated to
+   0 bytes, or re-written by another process. `deliveries.yaml` is the only
+   authoritative delivery record.
+
+4. Read `tasks/<id>/meta.yaml` for `telegram.chat_id`. If missing, skip.
+
+5. Post via `send_telegram` with the **verbatim `plan.md` body** (exactly what
+   `read_file` returned in step 2 — do NOT compose, draft, paraphrase, or
+   summarize), followed by a single line break and the cue:
+   "Reply with **approve** / **reject** / a revision instruction."
+
+6. **Only after `send_telegram` returns successfully**, append a delivery record
+   to `tasks/<id>/deliveries.yaml`. Use `write_file` to write (or overwrite
+   with the updated content):
+   ```yaml
+   plans:
+     - first_line: "<first non-empty line of plan.md>"
+       chat_id: "<chat_id>"
+       sent_at: "<ISO 8601 timestamp>"
+   ```
+   If the file already contained earlier entries (from plan revisions), preserve
+   them in the list and append the new entry.
+
+   Never write to `deliveries.yaml` before the send succeeds. A write here is
+   a commitment that the user received the message.
 
 ### `tasks/<id>/task.md`
 
@@ -82,6 +118,23 @@ making it the single reliable trigger for plan notifications.
 The watcher may fire repeatedly for the same path (initial create, then
 status updates). The `.notified` markers make all of the above
 idempotent — re-firing is safe.
+
+## Answering "what's the status?" questions
+
+When the user asks about the current state of a task (plan sent, awaiting
+approval, etc.), answer **from the files, not from memory**:
+
+- **Was the plan sent?** — Non-empty `tasks/<id>/deliveries.yaml` with at least
+  one `plans:` entry whose `chat_id` matches this chat → yes. Absent or empty
+  file → no. Never infer delivery from `plan.notified` alone.
+- **Is approval pending?** — `meta.yaml#plan_decision: pending` AND
+  `deliveries.yaml` has a matching entry → plan sent and awaiting approval.
+- **Was the plan revised?** — Multiple entries in `deliveries.yaml#plans` means
+  multiple rounds of plan delivery happened.
+
+If you have not read `deliveries.yaml` yet in this turn, read it now before
+answering. Stating that a plan was sent when `deliveries.yaml` is absent or
+empty is always wrong — that was the failure mode in the 2026-05-14 incident.
 
 ## Reacting to user replies
 
