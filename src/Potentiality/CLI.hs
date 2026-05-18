@@ -13,6 +13,7 @@ import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy.Char8 qualified as BL
 import Data.List (sortOn)
+import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -843,7 +844,15 @@ agentDone msgM = do
   (vault, tid) <- resolveTaskFromEnv
   now <- getCurrentTime
   mutateFrontmatter vault tid (\fm -> fm {fmStatus = Done})
-  mutateMeta vault tid (\m -> m {metaFinishedAt = Just now})
+  -- Overwrite current_step with a terminal value so the recorded
+  -- last-step text reflects the actual end state, not whatever the
+  -- agent set most recently before stopping. Prevents stale strings
+  -- like "Awaiting user response …" from being the final record.
+  mutateMeta vault tid $ \m ->
+    m
+      { metaFinishedAt = Just now
+      , metaCurrentStep = Just (fromMaybe "done" msgM)
+      }
   case msgM of
     Just msg -> do
       fp <- transcriptFile vault tid
@@ -855,7 +864,11 @@ agentBlocked reason = do
   (vault, tid) <- resolveTaskFromEnv
   now <- getCurrentTime
   mutateFrontmatter vault tid (\fm -> fm {fmStatus = Blocked})
-  mutateMeta vault tid (\m -> m {metaFinishedAt = Just now})
+  mutateMeta vault tid $ \m ->
+    m
+      { metaFinishedAt = Just now
+      , metaCurrentStep = Just ("blocked: " <> reason)
+      }
   fp <- transcriptFile vault tid
   appendTextLine fp ("\n## blocked\nReason: " <> reason)
 

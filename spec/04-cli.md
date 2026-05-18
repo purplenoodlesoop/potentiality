@@ -164,6 +164,14 @@ Update `meta.yaml#current_step`. Fire-and-forget.
 pot agent status "spawning 3 subagents for investigation"
 ```
 
+`current_step` is the user-facing "what is this task doing right now?"
+field surfaced by `pot do list`, `pot do show`, and chat-client
+progress signals. It is **overwritten by `pot agent done` and `pot agent
+blocked`** at task termination so the recorded last step always
+reflects the actual terminal state (`done`, the optional `--message`
+text, or `blocked: <reason>`), never a stale intent the agent set
+mid-run but did not carry through.
+
 ### `pot agent note <text>`
 
 Append a manual note to `transcript.md` (separate from auto-logged tool output).
@@ -182,11 +190,11 @@ Write `plan.md` (overwrites previous), block on user approval. Returns:
 
 ### `pot agent done [--message "..."]`
 
-Mark `status: done`. Implicit when the spawned claude exits cleanly with a `result` event; explicit call is for early termination.
+Mark `status: done`. Implicit when the spawned claude exits cleanly with a `result` event; explicit call is for early termination. Sets `meta.yaml#finished_at` and overwrites `meta.yaml#current_step` with the `--message` text (or `"done"` if not given).
 
 ### `pot agent blocked --reason "..."`
 
-Mark `status: blocked`. Used when Claude cannot proceed and needs human intervention beyond a yes/no answer.
+Mark `status: blocked`. Used when Claude cannot proceed and needs human intervention beyond a yes/no answer. Sets `meta.yaml#finished_at` and overwrites `meta.yaml#current_step` with `"blocked: <reason>"`.
 
 ## Subcommand summary table
 
