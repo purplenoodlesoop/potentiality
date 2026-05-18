@@ -149,3 +149,41 @@ data KindSpec = KindSpec
 ```
 
 Kinds are not pluggable at runtime in v1; adding one is a code change. Worth noting: this is a deliberate constraint to keep the surface small.
+
+## Per-kind contract files (operator-defined)
+
+Each kind's source-defined `kindPromptAdd` is the **mechanism-level** prose that ships with `pot` and applies to every task of that kind, regardless of who deploys the daemon. Operators can also add **deployment-level** prose by dropping a markdown file at:
+
+```
+<vault>/_potentiality/kinds/<kind>.md
+```
+
+When present, that file's contents are appended to the spawned agent's system prompt immediately after the kind's source-defined preamble and the `Mode:` line. Opt-in: a missing file means no extra prose, and behavior is identical to pre-#10 builds.
+
+Typical uses:
+
+- `kind: code` → "before calling `pot agent done`, run the repo's verification command (e.g. `nix build`, `pytest`) and report the result inline."
+- `kind: research` → "before declaring done, cross-reference the findings against the relevant capability or knowledge file and link both ways."
+- `kind: design` → "every proposal must include an `## Alternatives considered` section."
+
+The file is read **fresh per spawn** — edits propagate on the next task without restarting the daemon, mirroring how capabilities work in Horizon.
+
+## Pre-`done` verify hook (per-task)
+
+Tasks can declare a shell command in frontmatter:
+
+```yaml
+---
+kind: code
+title: Implement X
+verify: nix build .#default
+---
+```
+
+When set, `pot agent done` runs the command via `bash -c <verify>` before accepting the transition. Non-zero exit refuses the transition — the task stays `in_progress`, the verify output is appended to `transcript.md` under a `## verify (exit=N)` header, and `pot agent done` exits with code 2 so the spawned agent can read the failure and fix-and-retry without operator intervention.
+
+A successful verify proceeds with the normal done sequence (sets `finished_at`, overwrites `current_step`, etc.).
+
+The verify hook is **opt-in per task**. A `kind: code` task whose frontmatter has no `verify:` field behaves exactly as today.
+
+Together, the kind contract file and the verify hook implement the two-layer policy described in issue #10: the contract tells the agent **what** to check, the verify hook enforces that it **was** checked.
