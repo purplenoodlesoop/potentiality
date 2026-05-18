@@ -12,6 +12,7 @@ module Potentiality.Log
   ) where
 
 import Data.Aeson (Value, encode, object, (.=))
+import Data.Aeson.Key qualified as Key
 import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Lazy.Char8 qualified as BL8
 import Data.Text (Text)
@@ -33,6 +34,6 @@ logEvent event fields = do
           [ "ts" .= now
           , "event" .= event
           ]
-            <> map (uncurry (.=)) fields
+            <> map (\(k, v) -> Key.fromText k .= v) fields
   BL.hPut stderr (encode payload)
   BL8.hPutStr stderr "\n"
