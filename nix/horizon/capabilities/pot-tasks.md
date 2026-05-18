@@ -36,14 +36,21 @@ updates will route back there.
 - `tasks/<id>/questions/<NNN>.answer.md` — written by `task_answer`; the agent reads it to unblock.
 - `tasks/<id>/plan.md` — raw markdown (no frontmatter). State lives in `meta.yaml#plan_decision` (`pending`, `approved`, `revise`, `rejected`).
 - `tasks/<id>/findings.md` — written by `kind: research` / `kind: design` tasks. The deliverable for those kinds.
-- `tasks/<id>/deliveries.yaml` — written by **this capability** (not the daemon) to log plan notifications that were actually delivered. Structure:
+- `tasks/<id>/deliveries.yaml` — written by **this capability** (not the daemon) to log notifications that were actually delivered. Structure:
   ```yaml
   plans:
     - first_line: "<first non-empty line of plan.md at send time>"
       chat_id: "<chat_id>"
-      sent_at: "2026-05-14T09:43:17Z"
+      sent_at: "<ISO 8601 timestamp>"
+  completions:
+    - status: "<done|blocked>"
+      chat_id: "<chat_id>"
+      sent_at: "<ISO 8601 timestamp>"
+  progress:
+    - chat_id: "<chat_id>"
+      sent_at: "<ISO 8601 timestamp>"
   ```
-  This is the authoritative record of whether a plan was delivered. The file is written **only after** `send_telegram` returns successfully. A missing or empty file means no plan has been delivered yet.
+  This is the authoritative record of which notifications have been delivered. Each list is written **only after** `send_telegram` returns successfully. A missing list (or missing file) means nothing of that kind has been delivered yet.
 - `tasks/<id>/transcript.md` and `transcript.jsonl` — agent transcripts; useful for `task_tail` debugging but not for user replies.
 
 Never edit these directly. Always use the `task_*` tools.
@@ -110,31 +117,77 @@ making it the single reliable trigger for plan notifications.
 
 ### `tasks/<id>/task.md`
 
-1. Read frontmatter. If `status` is not `done` or `blocked`, skip — the daemon writes task.md on every status change, including intermediate ones.
-2. If `tasks/<id>/status.<status>.notified` exists, skip.
-3. Post a one-line status to the bound chat. For `kind: research` / `kind: design`, prepend the first ~20 lines of `tasks/<id>/findings.md` if it exists.
-4. Write `tasks/<id>/status.<status>.notified`.
+The daemon writes `task.md` on every status change, including intermediate
+ones, and a single transition to `done` / `blocked` can fire multiple
+vault events as the daemon rewrites frontmatter and content. Use
+`deliveries.yaml#completions` as the authoritative dedup gate, **not**
+file mtime or `.notified` markers.
 
-The watcher may fire repeatedly for the same path (initial create, then
-status updates). The `.notified` markers make all of the above
-idempotent — re-firing is safe.
+1. Read frontmatter. If `status` is not `done` or `blocked`, return with no
+   tool calls. **"Skip" means do nothing — do not post a courtesy reply
+   like "no action needed" to the user.** Multiple intermediate events
+   for one transition would otherwise produce duplicate user-visible
+   replies (the 2026-05-18 incident).
+2. Read `tasks/<id>/meta.yaml` for `telegram.chat_id`. If missing, return
+   with no tool calls.
+3. Read `tasks/<id>/deliveries.yaml`. If it has a `completions:` entry
+   with `status` matching the current status AND `chat_id` matching this
+   chat, return with no tool calls — the completion was already
+   delivered.
+4. Build the reply:
+   - For `kind: research` / `kind: design` / `kind: review`, read
+     `tasks/<id>/findings.md`. Extract the section under the first
+     `## TL;DR` or `## Decision` heading (whichever appears first) and
+     inline it verbatim. If neither heading exists, inline the first
+     ~30 non-blank lines. The user must be able to decide on the
+     artifact from the chat alone — do not just summarize and point
+     at the file.
+   - For `kind: code` / `kind: general`, post a one-line status (title +
+     status + ULID).
+5. Post via `send_telegram`.
+6. **Only after `send_telegram` returns successfully**, append a
+   `completions:` entry to `tasks/<id>/deliveries.yaml` preserving any
+   existing entries (in any list).
+
+### Heartbeat / schedule fires — progress signal for stuck tasks
+
+When this capability fires on a heartbeat / schedule tick rather than a
+specific vault event, scan for `kind: code` / `kind: research` /
+`kind: design` / `kind: review` tasks whose `meta.yaml` shows
+`status: in_progress` AND `started_at` more than 5 minutes ago AND
+either no `progress:` entry in `deliveries.yaml` for the bound chat or
+the most recent `progress.sent_at` is more than 5 minutes ago. For each
+matching task:
+
+1. Read `tasks/<id>/meta.yaml` for `current_step` and `telegram.chat_id`.
+   If `chat_id` is missing, skip this task.
+2. Post a single one-line update via `send_telegram` to the bound chat:
+   `still working on <short title>: <current_step>` (truncate
+   `current_step` at 200 chars).
+3. Append a `progress:` entry to `tasks/<id>/deliveries.yaml`.
+
+This gives the user a liveness signal on long-running tasks (typical
+range 5–25 minutes) instead of silence between dispatch and completion.
 
 ## Answering "what's the status?" questions
 
 When the user asks about the current state of a task (plan sent, awaiting
 approval, etc.), answer **from the files, not from memory**:
 
-- **Was the plan sent?** — Non-empty `tasks/<id>/deliveries.yaml` with at least
-  one `plans:` entry whose `chat_id` matches this chat → yes. Absent or empty
-  file → no. Never infer delivery from `plan.notified` alone.
+- **Was the plan sent?** — `tasks/<id>/deliveries.yaml` with at least one
+  `plans:` entry whose `chat_id` matches this chat → yes. Absent file or
+  empty list → no. Never infer delivery from `plan.notified` alone.
 - **Is approval pending?** — `meta.yaml#plan_decision: pending` AND
-  `deliveries.yaml` has a matching entry → plan sent and awaiting approval.
-- **Was the plan revised?** — Multiple entries in `deliveries.yaml#plans` means
-  multiple rounds of plan delivery happened.
+  `deliveries.yaml#plans` has a matching entry → plan sent and awaiting
+  approval.
+- **Was the plan revised?** — Multiple entries in `deliveries.yaml#plans`
+  means multiple rounds of plan delivery happened.
+- **Was the completion already posted?** — `deliveries.yaml#completions`
+  with a `status` + `chat_id` matching → yes.
 
-If you have not read `deliveries.yaml` yet in this turn, read it now before
-answering. Stating that a plan was sent when `deliveries.yaml` is absent or
-empty is always wrong — that was the failure mode in the 2026-05-14 incident.
+If you have not read `deliveries.yaml` yet in this turn, read it now
+before answering. Stating that a notification was sent when the matching
+`deliveries.yaml` list is absent or empty is always wrong.
 
 ## Reacting to user replies
 
@@ -149,6 +202,24 @@ Find the most recent `tasks/<id>/questions/<NNN>.md` where
 
 If the user is selecting from `options` (e.g. they wrote "2"), resolve
 the index to the option's text and pass that as the answer.
+
+**Phrase the confirmation honestly.** `task_answer` writes
+`questions/<NNN>.answer.md`; the spawned agent reads it on its next
+poll and resumes from there. That is the entire mechanism. You must
+NOT claim to have:
+
+- "passed instructions along" to the running agent (the agent does not
+  receive new orthogonal instructions mid-task — only the answer to its
+  question reaches it),
+- "updated the system prompt", "added a policy", or "told the agent" to
+  do anything,
+- forwarded anything beyond the literal answer text.
+
+A truthful confirmation reads like: "Recorded as the answer to
+question N on task X — the agent will pick it up on its next poll."
+If the user's reply contained guidance the agent will not actually
+receive (e.g. policy directives unrelated to the question), say so
+explicitly so the user knows what reached the agent and what didn't.
 
 ### Plan reply
 
@@ -181,4 +252,4 @@ disambiguate by short title rather than guessing.
 
 - ULIDs are exactly 26 chars in Crockford base32: `[0-9A-HJKMNP-TV-Z]{26}` (no I/L/O/U). Use that regex when extracting from text.
 - Question numbers are zero-padded to 3 digits (`001`, `002`, …).
-- Files in `tasks/<id>/` are daemon-owned. The only files this capability writes there are the `.notified` markers (its own bookkeeping). Everything else goes through `task_*` tools.
+- Files in `tasks/<id>/` are daemon-owned. The only files this capability writes there are `.notified` markers for question delivery (its own bookkeeping) and `deliveries.yaml` for plan / completion / progress delivery. Everything else goes through `task_*` tools.
