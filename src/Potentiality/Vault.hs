@@ -22,6 +22,7 @@ module Potentiality.Vault
   , inboxDir
   , cancelFile
   , preferencesFile
+  , kindContractFile
   , parseTaskId
   ) where
 
@@ -104,6 +105,18 @@ zeroPad width n = replicate (max 0 (width - length s)) '0' <> s
 -- system prompt. Lives at the vault root so it survives across tasks.
 preferencesFile :: Vault -> Path Abs File
 preferencesFile (Vault root) = root </> [relfile|preferences.md|]
+
+-- | Per-kind contract file injected into the spawned agent's system
+-- prompt, alongside the task body and the kind preamble. Operator-
+-- defined policy — describes what "good" means for tasks of this
+-- kind (e.g. @kind: code@ → "before pot agent done, run the repo's
+-- verification command and report the result"). Opt-in: missing file
+-- means no extra prose, behavior identical to pre-#10. Hot-reloaded
+-- per task — edits propagate on the next spawn without restart.
+kindContractFile :: MonadThrow m => Vault -> Text -> m (Path Abs File)
+kindContractFile (Vault root) kt = do
+  rel <- parseRelFile (T.unpack kt <> ".md")
+  pure (root </> [reldir|_potentiality|] </> [reldir|kinds|] </> rel)
 
 -- | Lift a directory name into a 'TaskId'. No validation; ULID structure is
 -- a convention, not a guarantee. Listing 'tasksDir' and lifting each entry

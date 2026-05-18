@@ -192,6 +192,8 @@ Write `plan.md` (overwrites previous), block on user approval. Returns:
 
 Mark `status: done`. Implicit when the spawned claude exits cleanly with a `result` event; explicit call is for early termination. Sets `meta.yaml#finished_at` and overwrites `meta.yaml#current_step` with the `--message` text (or `"done"` if not given).
 
+If the task's frontmatter has a `verify:` field (a shell command), `pot agent done` runs it via `bash -c <verify>` **before** accepting the transition. Non-zero exit refuses the transition: status stays `in_progress`, the verify output is appended to `transcript.md` under `## verify (exit=N)`, and `pot agent done` itself exits with code 2 so the agent sees the failure and can fix-and-retry. See [`07-task-kinds.md`](./07-task-kinds.md) for the verify-hook contract and the per-kind contract files that complement it.
+
 ### `pot agent blocked --reason "..."`
 
 Mark `status: blocked`. Used when Claude cannot proceed and needs human intervention beyond a yes/no answer. Sets `meta.yaml#finished_at` and overwrites `meta.yaml#current_step` with `"blocked: <reason>"`.

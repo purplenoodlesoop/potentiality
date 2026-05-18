@@ -89,6 +89,12 @@ data Frontmatter = Frontmatter
   , fmLabels :: [Text]
   , fmModel :: Maybe Text
   , fmRetryCount :: Int
+  , -- | Optional shell command that gates @pot agent done@. When set, the
+    -- daemon runs it via @bash -c <verify>@ before accepting the
+    -- transition to @done@. Non-zero exit refuses the transition and
+    -- the agent stays @in_progress@ with the verify output appended to
+    -- the transcript so it can fix and retry. Issue #10.
+    fmVerify :: Maybe Text
   }
   deriving stock (Show)
 
@@ -294,6 +300,7 @@ instance FromJSON Frontmatter where
       <*> o .:? "labels" .!= []
       <*> o .:? "model"
       <*> o .:? "retry_count" .!= 0
+      <*> o .:? "verify"
 
 instance ToJSON Frontmatter where
   toJSON fm =
@@ -317,6 +324,7 @@ instance ToJSON Frontmatter where
         <> optKV "allowed_tools" (fmAllowedTools fm)
         <> optKV "telegram" (fmTelegram fm)
         <> optKV "model" (fmModel fm)
+        <> optKV "verify" (fmVerify fm)
 
 -- | Emit a YAML key only when the value is 'Just'. Keeps optional fields out
 -- of the round-tripped file when unset.

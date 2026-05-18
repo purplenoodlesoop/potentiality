@@ -33,9 +33,9 @@ import Potentiality.StreamJson
   , parseEvent
   , renderEvent
   )
-import Potentiality.Task (Frontmatter (..), Mode (..), Status (..), Task (..), TaskId (..), permissionModeText)
+import Potentiality.Task (Frontmatter (..), Mode (..), Status (..), Task (..), TaskId (..), kindText, permissionModeText)
 import Potentiality.Task.Write (mutateFrontmatter)
-import Potentiality.Vault (Vault (..), cancelFile, taskDir, transcriptFile, transcriptJsonlFile)
+import Potentiality.Vault (Vault (..), cancelFile, kindContractFile, taskDir, transcriptFile, transcriptJsonlFile)
 import System.Environment (getEnvironment, getExecutablePath)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory)
@@ -54,6 +54,11 @@ runClaude vault task = do
       tools = maybe (ksTools ks) id (fmAllowedTools fm)
 
   prefs <- loadPreferences vault
+  -- Per-kind contract from <vault>/_potentiality/kinds/<kind>.md
+  -- (issue #10). Opt-in: if the file is absent the contract section
+  -- is empty and behavior matches pre-#10. Read fresh per spawn so
+  -- edits propagate without daemon restart.
+  contractSection <- readKindContract vault (kindText kind)
   let prefSection = prefsToSystemPrompt prefs
       systemAppend =
         basePromptPreamble
@@ -62,6 +67,7 @@ runClaude vault task = do
           <> "\nMode: "
           <> modeTextOf mode
           <> "\n"
+          <> contractSection
           <> prefSection
 
   td <- taskDir vault tid
@@ -164,6 +170,26 @@ modeTextOf :: Mode -> Text
 modeTextOf = \case
   Ask -> "ask"
   Delegate -> "delegate"
+
+-- | Read the optional per-kind contract file. Returns empty text when
+-- the file is absent (the common case for kinds with no operator-
+-- defined contract). Wrapping the contract body in headers makes its
+-- boundary visible in the agent's system prompt.
+readKindContract :: Vault -> Text -> IO Text
+readKindContract vault kt = do
+  fp <- kindContractFile vault kt
+  exists <- doesFileExist fp
+  if not exists
+    then pure ""
+    else do
+      bs <- BS.readFile (toFilePath fp)
+      let body = either (const "") id (TE.decodeUtf8' bs)
+      pure $
+        "\n## Kind contract (kind="
+          <> kt
+          <> ")\n\n"
+          <> body
+          <> "\n"
 
 budgetArgs :: Maybe Double -> [String]
 budgetArgs Nothing = []

@@ -80,6 +80,7 @@ import Potentiality.Watch (watchVault)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure, exitSuccess, exitWith)
 import System.IO (hPutStrLn, stderr)
+import System.Process.Typed (closed, readProcess, setStdin, shell)
 
 -- ---------------------------------------------------------------------------
 -- Command tree
@@ -491,6 +492,7 @@ blankFrontmatter now kind status title mode priority repo model =
     , fmLabels = []
     , fmModel = model
     , fmRetryCount = 0
+    , fmVerify = Nothing
     }
 
 doList :: DoListOpts -> IO ()
@@ -877,12 +879,42 @@ checkPlanDecision vault tid = do
 agentDone :: Maybe Text -> IO ()
 agentDone msgM = do
   (vault, tid) <- resolveTaskFromEnv
+  -- Pre-done verify hook (issue #10). If the task's frontmatter has
+  -- a `verify` field, run it via `bash -c`. Non-zero exit refuses
+  -- the transition: task stays in_progress, verify output is
+  -- appended to the transcript, and pot agent done exits non-zero so
+  -- the spawned agent sees the failure and can fix-and-retry.
+  mTask <- readTaskMaybe vault tid
+  let mVerify = case mTask of
+        Just (Right t) -> fmVerify (taskFrontmatter t)
+        _ -> Nothing
+  case mVerify of
+    Just cmd -> do
+      (code, out, err) <- runVerify cmd
+      case code of
+        ExitSuccess -> do
+          appendVerify vault tid cmd code out err
+          finalizeDone vault tid msgM
+        ExitFailure n -> do
+          appendVerify vault tid cmd code out err
+          logEvent
+            "task_verify_failed"
+            [ ("task", toJSON tid)
+            , ("exit_code", toJSON n)
+            ]
+          hPutStrLn stderr $
+            "pot agent done refused: verify exited with " <> show n
+              <> ". Task stays in_progress. See transcript for output."
+          exitWith (ExitFailure 2)
+    Nothing -> finalizeDone vault tid msgM
+
+-- | Apply the actual done transition once verify has either passed
+-- or been skipped. Overwrites current_step with a terminal value
+-- (issue #9) so the recorded last-step text reflects end state.
+finalizeDone :: Vault -> TaskId -> Maybe Text -> IO ()
+finalizeDone vault tid msgM = do
   now <- getCurrentTime
   mutateFrontmatter vault tid (\fm -> fm {fmStatus = Done})
-  -- Overwrite current_step with a terminal value so the recorded
-  -- last-step text reflects the actual end state, not whatever the
-  -- agent set most recently before stopping. Prevents stale strings
-  -- like "Awaiting user response …" from being the final record.
   mutateMeta vault tid $ \m ->
     m
       { metaFinishedAt = Just now
@@ -894,6 +926,36 @@ agentDone msgM = do
       appendTextLine fp ("\n## done\n" <> msg)
     Nothing -> pure ()
   logEvent "task_done" [("task", toJSON tid)]
+
+-- | Run the verify command in a subshell. Captures stdout + stderr
+-- separately so the transcript can show both. Inherits the process'
+-- working directory and environment, which under `pot do watch` is
+-- the task's working directory (the spawned agent's POSIX cwd).
+runVerify :: Text -> IO (ExitCode, Text, Text)
+runVerify cmd = do
+  let pc = setStdin closed (shell (T.unpack cmd))
+  (code, out, err) <- readProcess pc
+  let dec = either (const "") id . TE.decodeUtf8' . BL.toStrict
+  pure (code, dec out, dec err)
+
+appendVerify :: Vault -> TaskId -> Text -> ExitCode -> Text -> Text -> IO ()
+appendVerify vault tid cmd code out err = do
+  fp <- transcriptFile vault tid
+  let header =
+        "\n## verify (exit="
+          <> T.pack (show (exitCodeInt code))
+          <> ")\n$ "
+          <> cmd
+          <> "\n"
+      body =
+        (if T.null out then "" else "stdout:\n" <> out <> "\n")
+          <> (if T.null err then "" else "stderr:\n" <> err <> "\n")
+  appendTextLine fp (header <> body)
+
+exitCodeInt :: ExitCode -> Int
+exitCodeInt = \case
+  ExitSuccess -> 0
+  ExitFailure n -> n
 
 agentBlocked :: Text -> IO ()
 agentBlocked reason = do
