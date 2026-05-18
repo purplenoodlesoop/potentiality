@@ -46,6 +46,7 @@ library
     Potentiality.ClaudeCode
     Potentiality.CLI
     Potentiality.Kind
+    Potentiality.Log
     Potentiality.Meta
     Potentiality.Preferences
     Potentiality.StreamJson
