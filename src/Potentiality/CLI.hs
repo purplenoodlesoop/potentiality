@@ -7,7 +7,7 @@ module Potentiality.CLI
   ) where
 
 import Control.Monad (forM, unless, when)
-import Data.Aeson (Value, object, (.=))
+import Data.Aeson (Value, object, toJSON, (.=))
 import Data.Char (isDigit)
 import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.ByteString qualified as BS
@@ -28,6 +28,7 @@ import Path qualified
 import Path.IO (doesDirExist, doesFileExist, ensureDir, getCurrentDir, listDir)
 import Potentiality.Atomic (atomicWriteBinaryFile)
 import Potentiality.ClaudeCode (runClaude)
+import Potentiality.Log (logEvent)
 import Potentiality.Meta
   ( Meta (..)
   , PlanDecision (..)
@@ -451,6 +452,13 @@ doNew o = do
       task = Task {taskId = tid, taskFrontmatter = fm, taskBody = body}
   writeTaskFile vault task
   applyBinds vault tid (dnBinds o)
+  logEvent
+    "task_new"
+    [ ("task", toJSON tid)
+    , ("kind", toJSON (kindText kind))
+    , ("status", toJSON (statusText status))
+    , ("title", toJSON title)
+    ]
   TIO.putStrLn (unTaskId tid)
 
 blankFrontmatter
@@ -746,14 +754,37 @@ agentAsk o = do
           <> "---\n"
           <> TE.encodeUtf8 (aaQuestion o <> "\n")
   atomicWriteBinaryFile qfp content
+  logEvent
+    "question_asked"
+    [ ("task", toJSON tid)
+    , ("num", toJSON num)
+    , ("urgency", toJSON (aaUrgency o))
+    ]
   res <- waitForFile afp [cancelFp] (aaTimeout o)
   case res of
     Found () -> do
       bs <- BS.readFile (toFilePath afp)
       let txt = either (const "") id (TE.decodeUtf8' bs)
+      logEvent
+        "answer_received"
+        [ ("task", toJSON tid)
+        , ("num", toJSON num)
+        ]
       TIO.putStrLn (T.strip txt)
-    Cancelled -> exitWith (ExitFailure 130)
-    TimedOut -> exitWith (ExitFailure 124)
+    Cancelled -> do
+      logEvent
+        "question_cancelled"
+        [ ("task", toJSON tid)
+        , ("num", toJSON num)
+        ]
+      exitWith (ExitFailure 130)
+    TimedOut -> do
+      logEvent
+        "question_timeout"
+        [ ("task", toJSON tid)
+        , ("num", toJSON num)
+        ]
+      exitWith (ExitFailure 124)
 
 parseOptionsCsv :: Maybe Text -> Maybe [Text]
 parseOptionsCsv Nothing = Nothing
@@ -814,17 +845,21 @@ agentPlan txt = do
   -- stable, fully-written plan file rather than the intermediate write.
   nfp <- planNotifiedFile vault tid
   atomicWriteBinaryFile nfp ""
+  logEvent "plan_written" [("task", toJSON tid)]
   cancelFp <- cancelFile vault tid
   res <- waitForCondition (checkPlanDecision vault tid) [cancelFp] Nothing
   case res of
     Found PDApproved -> do
+      logEvent "plan_approved" [("task", toJSON tid)]
       TIO.putStrLn "approved"
       exitSuccess
     Found PDRevise -> do
       m <- readMetaOrEmpty vault tid
+      logEvent "plan_revise" [("task", toJSON tid)]
       TIO.putStrLn ("revise: " <> maybe "" id (metaPlanRevision m))
       exitSuccess
     Found PDRejected -> do
+      logEvent "plan_rejected" [("task", toJSON tid)]
       TIO.putStrLn "rejected"
       exitWith (ExitFailure 1)
     Found PDPending -> die "internal error: waiter returned PDPending"
@@ -858,6 +893,7 @@ agentDone msgM = do
       fp <- transcriptFile vault tid
       appendTextLine fp ("\n## done\n" <> msg)
     Nothing -> pure ()
+  logEvent "task_done" [("task", toJSON tid)]
 
 agentBlocked :: Text -> IO ()
 agentBlocked reason = do
@@ -871,6 +907,11 @@ agentBlocked reason = do
       }
   fp <- transcriptFile vault tid
   appendTextLine fp ("\n## blocked\nReason: " <> reason)
+  logEvent
+    "task_blocked"
+    [ ("task", toJSON tid)
+    , ("reason", toJSON reason)
+    ]
 
 -- ---------------------------------------------------------------------------
 -- Helpers

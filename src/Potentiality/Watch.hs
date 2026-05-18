@@ -15,11 +15,13 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, writeTVar)
 import Control.Exception (SomeException, catch)
 import Control.Monad (forM_, forever, void, when)
+import Data.Aeson (toJSON)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Path (toFilePath)
 import Path.IO (ensureDir)
 import Potentiality.ClaudeCode (runClaude)
+import Potentiality.Log (logEvent)
 import Potentiality.Task (Frontmatter (..), Status (..), Task (..), TaskId)
 import Potentiality.Task.Write (mutateFrontmatter, readTaskMaybe)
 import Potentiality.Vault (Vault, tasksDir)
@@ -34,6 +36,7 @@ import System.Posix.Process (getProcessID)
 watchVault :: Vault -> Int -> IO ()
 watchVault vault maxConcurrent = do
   ensureDir (tasksDir vault)
+  logEvent "watch_started" [("max_concurrent", toJSON maxConcurrent)]
   slots <- newTVarIO 0
   scanAndClaim vault slots maxConcurrent
   withManager $ \mgr -> do
@@ -72,6 +75,11 @@ claim vault tid = do
       , fmAgentOwner (taskFrontmatter task) == Nothing -> do
           owner <- mkOwner
           mutateFrontmatter vault tid $ \f -> f {fmAgentOwner = Just owner}
+          logEvent
+            "task_claimed"
+            [ ("task", toJSON tid)
+            , ("owner", toJSON owner)
+            ]
           pure True
     _ -> pure False
 
@@ -84,10 +92,19 @@ runOne :: Vault -> TaskId -> TVar Int -> IO ()
 runOne vault tid slots = do
   mTask <- readTaskMaybe vault tid
   case mTask of
-    Just (Right task) ->
+    Just (Right task) -> do
+      logEvent "agent_spawned" [("task", toJSON tid)]
       runClaude vault task
-        `catch` \(e :: SomeException) ->
-          hPutStrLn stderr ("watch: claude run failed for " <> show tid <> ": " <> show e)
-    _ ->
+        `catch` ( \(e :: SomeException) -> do
+                    hPutStrLn stderr ("watch: claude run failed for " <> show tid <> ": " <> show e)
+                    logEvent
+                      "agent_failed"
+                      [ ("task", toJSON tid)
+                      , ("error", toJSON (T.pack (show e)))
+                      ]
+                )
+      logEvent "agent_exited" [("task", toJSON tid)]
+    _ -> do
       hPutStrLn stderr ("watch: could not re-read task after claim: " <> show tid)
+      logEvent "claim_reread_failed" [("task", toJSON tid)]
   atomically (modifyTVar' slots (subtract 1))
