@@ -103,6 +103,47 @@ When the user sends a message into a bound thread, the client:
 - If a plan is pending: write `plan_decision: approved | revise | rejected` and (for revise) `plan_revision: <text>` into `vault/tasks/<id>/meta.yaml`.
 - Otherwise: treat as a fresh chat input. May call `task_new` again, or do whatever the client normally does.
 
+### 5. Vault filesystem permissions
+
+The spawned agent process and the chat client typically run as **different
+users**. Pot's `do watch` daemon spawns Claude Code as a configured user
+(commonly the operator's login user, to inherit credentials like `gh auth`,
+`wrangler`, etc.); the chat client and its vault layout are usually owned by
+a service user (e.g. `horizon`). Both users need to read and write across
+the vault.
+
+Two layers of expectation:
+
+- **`vault/tasks/<id>/`** is created by the pot daemon as the spawn user.
+  Daemon-owned files (`.lock`, `status.<status>.notified`, `plan.notified`,
+  `deliveries.yaml`) and agent-owned files (`task.md`, `meta.yaml`,
+  `plan.md`, `findings.md`, `transcript.*`) coexist in the same directory.
+  The chat client must be able to read all of these and to write the
+  small subset documented in §4 (`questions/NNN.answer.md`,
+  `meta.yaml#plan_decision` updates).
+
+- **Other vault subdirectories the agent may need to write to** (for example
+  `vault/todos/`, `vault/people/`, `vault/journal/` when the spawned agent
+  is asked to add a new entry) are owned by the chat client's service user
+  by default. Without group-write, an agent asked to file a new todo
+  falls back to writing inside its task directory with a manual
+  instruction for the operator to `mv` the file into place — which
+  defeats the purpose.
+
+Recommended convention: pick a **shared unix group** that contains both
+the chat-client service user and the spawn user, and set vault subdirs
+that the agent is expected to modify to `chmod g+ws` (the `s` so newly
+created files inherit the group). For NixOS deployments, the
+[`services.potentiality.horizon`](./09-provisioning.md) module documents
+its option set; an operator wiring this up should add both users to a
+shared group and set the relevant directories accordingly. Pot does not
+enforce any permission convention itself.
+
+If the cross-user write path is impossible in your deployment, the
+fallback is for the agent to write inside its own task directory and
+ask the chat client (via `pot agent ask`) to move the file. This is
+correct but slow and produces noise; prefer the shared-group setup.
+
 ## What the chat client does NOT need to know
 
 - Anything about `claude -p`, stream-json, or Claude Code internals.

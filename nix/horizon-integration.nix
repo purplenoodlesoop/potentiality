@@ -105,6 +105,19 @@ in
     # rebuilds. To bump the capability prose, remove the file and
     # rebuild — the symlink reappears pointing at the new store
     # path.
+    #
+    # Cross-user filesystem-permissions note: when pot's spawn user
+    # differs from Horizon's service user (the common setup — pot
+    # spawns Claude as the operator's login user so credentials like
+    # `gh auth` and `wrangler` are inherited, while Horizon runs as
+    # the `horizon` service user that owns the vault), the spawned
+    # agent will be unable to write to vault subdirectories that are
+    # owned by the Horizon group without group-write. See
+    # `spec/08-chat-client-integration.md` §5 — the recommended
+    # convention is a shared group with `chmod g+ws` on subdirs the
+    # agent is expected to modify (e.g. `todos/`, `people/`,
+    # `journal/`). This module does not configure those permissions
+    # itself because the right set is deployment-specific.
     systemd.tmpfiles.rules = lib.optional cfg.installCapability
       "L ${cfg.vault}/_horizon/capabilities/pot-tasks.md - ${cfg.capabilityOwner} ${cfg.capabilityGroup} - ${capabilityFile}";
   };
