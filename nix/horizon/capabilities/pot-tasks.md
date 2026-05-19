@@ -1,12 +1,13 @@
 ---
 id: pot-tasks
-description: "Load when the user wants to file or check on long-running autonomous agent work (coding, research, design, review) handled by the Potentiality runner. Also loads on vault-watcher events under tasks/* — new questions awaiting an answer, new plans awaiting a decision, or status transitions to done/blocked."
+description: "Load when the user wants to file or check on long-running autonomous agent work (coding, research, design, review) handled by the Potentiality runner. Also loads on vault-watcher events under tasks/* — new questions awaiting an answer, new plans awaiting a decision, or status transitions to done/blocked. Never fires on heartbeats."
 watch:
   - "tasks/*/questions/[0-9][0-9][0-9].md"
   - "tasks/*/plan.notified"
   - "tasks/*/task.md"
-schedule: 1m
 ---
+
+**Heartbeat events: return with NO tool calls.** This capability is not a heartbeat-driven scanner. It only responds to direct user messages and the three vault-watcher globs above. If the triggering event is a `heartbeat_*` event, do nothing — no scans, no `read_file`, no `send_telegram*`.
 
 You delegate long-running work to Potentiality, an autonomous Claude Code
 runner that writes results into `tasks/<ULID>/` in the same vault.
@@ -45,9 +46,6 @@ updates will route back there.
   completions:
     - status: "<done|blocked>"
       chat_id: "<chat_id>"
-      sent_at: "<ISO 8601 timestamp>"
-  progress:
-    - chat_id: "<chat_id>"
       sent_at: "<ISO 8601 timestamp>"
   ```
   This is the authoritative record of which notifications have been delivered. Each list is written **only after** `send_telegram` returns successfully. A missing list (or missing file) means nothing of that kind has been delivered yet.
@@ -149,26 +147,6 @@ file mtime or `.notified` markers.
    `completions:` entry to `tasks/<id>/deliveries.yaml` preserving any
    existing entries (in any list).
 
-### Heartbeat / schedule fires — progress signal for stuck tasks
-
-When this capability fires on a heartbeat / schedule tick rather than a
-specific vault event, scan for `kind: code` / `kind: research` /
-`kind: design` / `kind: review` tasks whose `meta.yaml` shows
-`status: in_progress` AND `started_at` more than 5 minutes ago AND
-either no `progress:` entry in `deliveries.yaml` for the bound chat or
-the most recent `progress.sent_at` is more than 5 minutes ago. For each
-matching task:
-
-1. Read `tasks/<id>/meta.yaml` for `current_step` and `telegram.chat_id`.
-   If `chat_id` is missing, skip this task.
-2. Post a single one-line update via `send_telegram` to the bound chat:
-   `still working on <short title>: <current_step>` (truncate
-   `current_step` at 200 chars).
-3. Append a `progress:` entry to `tasks/<id>/deliveries.yaml`.
-
-This gives the user a liveness signal on long-running tasks (typical
-range 5–25 minutes) instead of silence between dispatch and completion.
-
 ## Answering "what's the status?" questions
 
 When the user asks about the current state of a task (plan sent, awaiting
@@ -252,4 +230,4 @@ disambiguate by short title rather than guessing.
 
 - ULIDs are exactly 26 chars in Crockford base32: `[0-9A-HJKMNP-TV-Z]{26}` (no I/L/O/U). Use that regex when extracting from text.
 - Question numbers are zero-padded to 3 digits (`001`, `002`, …).
-- Files in `tasks/<id>/` are daemon-owned. The only files this capability writes there are `.notified` markers for question delivery (its own bookkeeping) and `deliveries.yaml` for plan / completion / progress delivery. Everything else goes through `task_*` tools.
+- Files in `tasks/<id>/` are daemon-owned. The only files this capability writes there are `.notified` markers for question delivery (its own bookkeeping) and `deliveries.yaml` for plan and completion delivery. Everything else goes through `task_*` tools.
