@@ -29,6 +29,52 @@ Pass the inbound event's `chat_id` to `task_new` so the task is bound to
 the chat that requested it. Questions, plan decisions, and final status
 updates will route back there.
 
+### MANDATORY: preview-and-confirm before `task_new`
+
+**You may NOT call `task_new` in the same turn the user requested
+the task.** Wrong-topic dispatches are a known failure mode: the user
+says "spin a research task" in reply to your earlier question about
+topic X, and you bind the request to an older unrelated forwarded
+message (topic Y) — pot runs the wrong investigation, the user gets
+the wrong findings, and you can't roll it back. (Observed 2026-05-20.)
+
+The protocol is two turns:
+
+**Turn N (preview):**
+1. Identify which topic the user is referring to. If your most recent
+   prior reply was a question (e.g. "Want me to spin up a research
+   task for X?"), the user's "yes" / "spin a task" / "do it" binds to
+   **X** — not to any earlier topic. The history `[your prior reply]`
+   entries are how you know what you most recently asked. If the
+   user's message is the first mention of a research request, pick
+   the most-recently-discussed topic. If multiple topics are
+   plausible, list them and ask which one.
+2. Compose the task body — title, kind, ~3 bullets of scope.
+3. Post a preview via `send_telegram`:
+   > About to spawn:
+   > • kind: research
+   > • title: "<short title>"
+   > • scope: <2-3 bullets>
+   >
+   > Reply <b>yes</b> to dispatch, or correct topic/scope.
+4. **Return without calling `task_new`.** That tool is reserved for
+   turn N+1.
+
+**Turn N+1 (dispatch on confirm):**
+1. The orchestrator's history now includes your turn-N preview as
+   `[your prior reply] About to spawn …`.
+2. If the user's current message is an affirmative (yes / go / ok /
+   ✓), call `task_new` with the previewed body verbatim.
+3. If the user proposed a correction (different topic, different
+   scope), go back to Turn N with the corrected body.
+4. If the user said no / cancel, acknowledge and do not call
+   `task_new`.
+
+**Never call `task_new` without an immediately-preceding self-preview
+that the user explicitly approved.** Skipping the preview on a
+"clear" request is the failure mode — what's clear to you may bind
+to the wrong topic.
+
 ## File layout the daemon writes
 
 - `tasks/<id>/task.md` — YAML frontmatter (status, kind, agent_owner, …) followed by the user prompt.
@@ -133,13 +179,24 @@ file mtime or `.notified` markers.
    chat, return with no tool calls — the completion was already
    delivered.
 4. Build the reply:
-   - For `kind: research` / `kind: design` / `kind: review`, read
-     `tasks/<id>/findings.md`. Extract the section under the first
-     `## TL;DR` or `## Decision` heading (whichever appears first) and
-     inline it verbatim. If neither heading exists, inline the first
-     ~30 non-blank lines. The user must be able to decide on the
-     artifact from the chat alone — do not just summarize and point
-     at the file.
+   - For `kind: research` / `kind: design` / `kind: review`:
+     - **If `tasks/<id>/findings.md` does not exist OR is empty**: post
+       a one-liner — *"Task `<id>` ended with status `<status>`. No
+       findings were produced — likely an agent error; check
+       `tasks/<id>/transcript.md`."* **NEVER fabricate, paraphrase,
+       summarize, or compose a substitute** for missing findings. If
+       the daemon's agent failed (e.g. auth error in 6 sec), there is
+       no research — say so honestly. The harness now structurally
+       refuses `write_file` to `tasks/<id>/findings.md` from the
+       orchestrator anyway; the rule is also stated here so you don't
+       try.
+     - If `findings.md` exists and has content: extract the section
+       under the first `## TL;DR` or `## Decision` heading and inline
+       it verbatim. If neither heading exists, inline the first ~30
+       non-blank lines verbatim. **Do not edit, paraphrase, or
+       extend.** Optionally attach the full file via
+       `send_telegram_document(chat_id, path: tasks/<id>/findings.md,
+       caption: "")`.
    - For `kind: code` / `kind: general`, post a one-line status (title +
      status + ULID).
 5. Post via `send_telegram`.
